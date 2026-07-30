@@ -26,14 +26,11 @@ logging.basicConfig(
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Greet the user and let them know how to interact
     await update.message.reply_text("Hello! You can message me directly, no need to use /chat.")
 
 
 async def tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Display available tools
     await update.message.reply_text("Available tools: /start, /tools, /create_file, /delete_file. Natural language messages can also trigger file tools when the model decides.")
-
 
 async def run_llm_with_tools(user_text: str) -> str:
     client = AsyncClient()
@@ -119,7 +116,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Capture all normal text messages (excluding commands)
     user_text = update.message.text
 
-    # Show the "typing..." action to the user (great for UX)
     await context.bot.send_chat_action(
         chat_id=update.effective_chat.id, 
         action=constants.ChatAction.TYPING
@@ -155,8 +151,9 @@ if __name__ == '__main__':
     # Handler for the /read_file command
     application.add_handler(CommandHandler('read_file', read_file_command))
 
-    # NEW: Handler that captures all regular text messages
-    # filters.COMMAND ensures that commands (like /start) are not treated as normal text
+    # Handler for the /write_file command
+    application.add_handler(CommandHandler('write_file', write_file_command))
+
     message_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     application.add_handler(message_handler)
 
