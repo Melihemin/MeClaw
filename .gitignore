@@ -42,3 +42,5 @@ __pycache__/
 *.bak
 
 TODO.md
+
+tools/finder/testdir/**

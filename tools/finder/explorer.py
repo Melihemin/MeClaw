@@ -1,9 +1,10 @@
 import logging
 import os
-import dotenv
 from telegram import Update, constants
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 from ollama import AsyncClient 
+from docx import Document
+from docx.shared import Pt
 
 path = os.path.dirname(os.path.abspath(__file__)) + "\\testdir"
 
@@ -149,6 +150,72 @@ def rename_file_tool(old_filename: str, new_filename: str) -> str:
         return "Failed to rename the file."
 
 
+
+# WORD file support
+
+def read_word_file_tool(filename: str) -> str:
+    """Read a Word (.docx) file inside the tools directory.
+
+    Args:
+        filename: Name of the Word file to read.
+
+    Returns:
+        The content of the Word file or an error message.
+    """
+    if not filename:
+        return "No filename provided."
+
+    try:
+        doc = Document(os.path.join(path, filename))
+        content = "\n".join([para.text for para in doc.paragraphs])
+        return content
+
+    except FileNotFoundError:
+        return f"File '{filename}' not found."
+
+    except Exception as e:
+        logging.error(f"Word File Read Error: {e}")
+        return "Failed to read the Word file."
+
+
+def write_word_file_tool(filename: str, content: str, font_name: str = None, font_size: int = None) -> str:
+    """Write content to a Word (.docx) file inside the tools directory.
+
+    Args:
+        filename: Name of the Word file to write to.
+        content: Content to write into the Word file.
+        font_name: (Optional) The name of the font to use (e.g., 'Arial', 'Times New Roman').
+        font_size: (Optional) The size of the font in points (e.g., 12, 14).
+
+    Returns:
+        A status message describing the result.
+    """
+    if not filename:
+        return "No filename provided."
+
+    try:
+        doc = Document()
+        for line in content.splitlines():
+            # Doğrudan paragrafa metin eklemek yerine, önce boş bir paragraf oluşturuyoruz
+            paragraph = doc.add_paragraph()
+            # Metni 'run' (metin bloğu) olarak ekliyoruz ki özelliklerini değiştirebilelim
+            run = paragraph.add_run(line)
+            
+            # Eğer kullanıcı (veya LLM) font adı belirtmişse uygula
+            if font_name:
+                run.font.name = font_name
+                
+            # Eğer kullanıcı (veya LLM) font boyutu belirtmişse uygula (Pt formatında olmalı)
+            if font_size:
+                run.font.size = Pt(font_size)
+                
+        doc.save(os.path.join(path, filename))
+        return f"Content written to '{filename}' successfully."
+
+    except Exception as e:
+        logging.error(f"Word File Write Error: {e}")
+        return "Failed to write to the Word file."
+
 async def create_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = update.message.text.split(' ', 1)
     if len(parts) <= 1 or not parts[1].strip():
@@ -207,4 +274,29 @@ async def rename_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     old_filename = parts[1].strip()
     new_filename = parts[2].strip()
     result = rename_file_tool(old_filename, new_filename)
+    await update.message.reply_text(result)
+
+
+async def write_word_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parts = update.message.text.split(' ', 3)
+    if len(parts) <= 3 or not parts[1].strip() or not parts[2].strip() or not parts[3].strip():
+        await update.message.reply_text("Please provide a filename, content, and optionally font name and size: /write_word_file example.docx 'Your content here' 'Arial' 12")
+        return
+
+    filename = parts[1].strip()
+    content = parts[2].strip()
+    font_name = parts[3].strip() if len(parts) > 3 else None
+    font_size = int(parts[4].strip()) if len(parts) > 4 else None
+
+    result = write_word_file_tool(filename, content, font_name, font_size)
+    await update.message.reply_text(result)
+
+async def read_word_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parts = update.message.text.split(' ', 1)
+    if len(parts) <= 1 or not parts[1].strip():
+        await update.message.reply_text("Please provide a filename: /read_word_file example.docx")
+        return
+
+    filename = parts[1].strip()
+    result = read_word_file_tool(filename)
     await update.message.reply_text(result)

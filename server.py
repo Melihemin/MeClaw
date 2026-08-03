@@ -16,7 +16,11 @@ from tools.finder.explorer import (
     write_file as write_file_command,
     write_file_tool,
     rename_file as rename_file_command,
-    rename_file_tool
+    rename_file_tool,
+    write_word_file as write_word_file_command,
+    write_word_file_tool,
+    read_word_file as read_word_file_command,
+    read_word_file_tool
 )
 
 dotenv.load_dotenv()
@@ -56,7 +60,7 @@ async def run_llm_with_tools(user_text: str) -> str:
         },
     ]
 
-    tools = [create_file_tool, delete_file_tool, copy_file_tool, read_file_tool, write_file_tool, rename_file_tool]
+    tools = [create_file_tool, delete_file_tool, copy_file_tool, read_file_tool, write_file_tool, rename_file_tool, write_word_file_tool, read_word_file_tool]
 
     for _ in range(5):
         response = await client.chat(
@@ -109,6 +113,16 @@ async def run_llm_with_tools(user_text: str) -> str:
                 tool_result = rename_file_tool(arguments.get('old_filename', ''), arguments.get('new_filename', ''))
                 if tool_result == 'Old or new filename not provided.':
                     return 'Please provide old and new filenames, for example: /rename_file old.txt new.txt'
+                return tool_result
+            elif tool_name == 'write_word_file_tool':
+                tool_result = write_word_file_tool(arguments.get('filename', ''), arguments.get('content', ''), arguments.get('font_name', None), arguments.get('font_size', None))
+                if tool_result == 'No filename provided.':
+                    return 'Please provide a filename and content, for example: /write_word_file example.docx "Your content here" "Arial" 12'
+                return tool_result
+            elif tool_name == 'read_word_file_tool':
+                tool_result = read_word_file_tool(arguments.get('filename', ''))
+                if tool_result == 'No filename provided.':
+                    return 'Please provide a filename, for example: /read_word_file example.docx'
                 return tool_result
             else:
                 tool_result = f'Unknown tool: {tool_name}'
@@ -166,6 +180,12 @@ if __name__ == '__main__':
 
     # Handler for the /rename_file command
     application.add_handler(CommandHandler('rename_file', rename_file_command))
+
+    # Handler for the /write_word_file command
+    application.add_handler(CommandHandler('write_word_file', write_word_file_command))
+
+    # Handler for the /read_word_file command
+    application.add_handler(CommandHandler('read_word_file', read_word_file_command))
 
     message_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     application.add_handler(message_handler)

@@ -1,4 +1,5 @@
 python-telegram-bot
-dotenv
+python-dotenv
 ollama
 requests
+python-docx
