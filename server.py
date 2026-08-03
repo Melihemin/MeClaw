@@ -4,7 +4,7 @@ import dotenv
 from telegram import Update, constants
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 from ollama import AsyncClient 
-from tools.explorer import (
+from tools.finder.explorer import (
     create_file as create_file_command,
     create_file_tool,
     delete_file as delete_file_command,
@@ -14,7 +14,9 @@ from tools.explorer import (
     read_file as read_file_command,
     read_file_tool,
     write_file as write_file_command,
-    write_file_tool
+    write_file_tool,
+    rename_file as rename_file_command,
+    rename_file_tool
 )
 
 dotenv.load_dotenv()
@@ -38,10 +40,14 @@ async def run_llm_with_tools(user_text: str) -> str:
         {
             'role': 'system',
             'content': (
-                'You are an assistant for Melih Emin KILICOGLU. '
-                'Decide whether a file should be created or deleted based on the user request. '
-                'Use the available tools when the user explicitly asks for file operations. '
-                'After tools run, explain the result clearly.'
+                'You are a friendly and conversational AI assistant for Melih Emin KILICOGLU. '
+                'You can chat naturally, answer questions, and assist with general tasks. '
+                'When the user\'s request involves managing files (such as creating, reading, deleting, or renaming), '
+                'proactively use the appropriate tools to fulfill the request. '
+                'Always explain the results of your actions clearly and kindly after using a tool. '
+                '\n\nSTRICT RULES FOR CONVERSATION: '
+                '1. If the user is just chatting normally (e.g., "how are you", "hello"), respond directly and naturally like a human. '
+                '2. NEVER mention your internal tools, say things like "No tool call is needed", or explain your decision-making process. Just give the final answer.'
             )
         },
         {
@@ -50,7 +56,7 @@ async def run_llm_with_tools(user_text: str) -> str:
         },
     ]
 
-    tools = [create_file_tool, delete_file_tool, copy_file_tool, read_file_tool, write_file_tool]
+    tools = [create_file_tool, delete_file_tool, copy_file_tool, read_file_tool, write_file_tool, rename_file_tool]
 
     for _ in range(5):
         response = await client.chat(
@@ -99,7 +105,11 @@ async def run_llm_with_tools(user_text: str) -> str:
                 if tool_result == 'No filename provided.':
                     return 'Please provide a filename and content, for example: /write_file example.txt "Your content here"'
                 return tool_result
-                            
+            elif tool_name == 'rename_file_tool':
+                tool_result = rename_file_tool(arguments.get('old_filename', ''), arguments.get('new_filename', ''))
+                if tool_result == 'Old or new filename not provided.':
+                    return 'Please provide old and new filenames, for example: /rename_file old.txt new.txt'
+                return tool_result
             else:
                 tool_result = f'Unknown tool: {tool_name}'
 
@@ -153,6 +163,9 @@ if __name__ == '__main__':
 
     # Handler for the /write_file command
     application.add_handler(CommandHandler('write_file', write_file_command))
+
+    # Handler for the /rename_file command
+    application.add_handler(CommandHandler('rename_file', rename_file_command))
 
     message_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     application.add_handler(message_handler)

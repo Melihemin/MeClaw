@@ -126,6 +126,29 @@ def write_file_tool(filename: str, content: str) -> str:
         logging.error(f"File Write Error: {e}")
         return "Failed to write to the file."
 
+def rename_file_tool(old_filename: str, new_filename: str) -> str:
+    """Rename a file inside the tools directory.
+
+    Args:
+        old_filename: Current name of the file.
+        new_filename: New name for the file.
+
+    Returns:
+        A status message describing the result.
+    """
+    if not old_filename or not new_filename:
+        return "Old or new filename not provided."
+
+    try:
+        os.rename(os.path.join(path, old_filename), os.path.join(path, new_filename))
+        return f"File '{old_filename}' renamed to '{new_filename}' successfully."
+    except FileNotFoundError:
+        return f"File '{old_filename}' not found."
+    except Exception as e:
+        logging.error(f"File Rename Error: {e}")
+        return "Failed to rename the file."
+
+
 async def create_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = update.message.text.split(' ', 1)
     if len(parts) <= 1 or not parts[1].strip():
@@ -174,4 +197,14 @@ async def write_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     content = parts[2].strip()
     result = write_file_tool(filename, content)
     await update.message.reply_text(result)
-    
+
+async def rename_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parts = update.message.text.split(' ', 2)
+    if len(parts) <= 2 or not parts[1].strip() or not parts[2].strip():
+        await update.message.reply_text("Please provide old and new filenames: /rename_file old.txt new.txt")
+        return
+
+    old_filename = parts[1].strip()
+    new_filename = parts[2].strip()
+    result = rename_file_tool(old_filename, new_filename)
+    await update.message.reply_text(result)
