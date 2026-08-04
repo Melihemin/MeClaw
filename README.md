@@ -1,36 +1,38 @@
-MeClaw
-======
+# MeClaw
 
-Overview
---------
-MeClaw is a software project repository designed to support the development of a Telegram-based assistant that can interact with files and perform basic operations through a local workflow. The project is currently under active development and is being expanded in a structured and maintainable manner.
+## Overview
+MeClaw is a local assistant project that combines a Telegram bot with file-management capabilities and an Ollama-powered conversational layer. The project is designed to let users interact with files and folders through natural language while keeping the implementation modular and extensible.
 
-Project Status
---------------
-The repository is being developed continuously. Current functionality includes a Telegram bot interface, local file management tools, and integration with an Ollama-based language model. Additional features and improved workflows are expected to be added over time.
+## Current Features
+- Telegram bot entry point in server.py
+- Class-based file and folder explorer in tools/finder/explorer_class.py
+- Tool schemas stored externally in tools/finder/tool_definitions.json
+- Support for creating, reading, writing, copying, renaming, and deleting files
+- Support for creating, listing, moving, renaming, copying, and zipping folders
+- DOCX read/write support via python-docx
+- Regression tests under tests/test_explorer_class.py
 
-How It Works
-------------
-The application is executed locally through the Python entry point in server.py. The bot receives user messages from Telegram, processes them, and can trigger file operations such as creating, reading, copying, writing, and deleting files. The underlying file operations are implemented in tools/explorer.py and are directed to the tools/testdir directory.
+## Project Structure
+- server.py: Telegram bot logic and tool wrapper functions
+- tools/finder/explorer_class.py: main explorer implementation
+- tools/finder/tool_definitions.json: Ollama tool schema definitions
+- tools/finder/testdir/: sample workspace used by the explorer
+- tests/test_explorer_class.py: functional tests for core explorer behavior
 
-Where It Runs
--------------
-The application is intended to run on a local development environment with Python installed. It communicates with Telegram via the Telegram Bot API and uses Ollama as the language model backend. In practical use, the system runs on the machine where the Python process is launched and where the required dependencies are installed.
-
-Installation and Setup
-----------------------
+## Installation
 1. Clone or download the repository.
-2. Install the required Python packages:
+2. Create and activate a Python environment if desired.
+3. Install dependencies:
    pip install -r requirements.txt
-3. Ensure that Ollama is installed and running locally.
-4. Configure the Telegram bot token in the environment variables, using the variable TELEGRAM_API.
-5. Start the application:
+4. Make sure Ollama is installed and running locally.
+5. Set the Telegram bot token in the environment as TELEGRAM_API.
+6. Start the bot:
    python server.py
 
-How to Use It
--------------
-Once the application is running, the bot can be used through Telegram. Users may interact with the bot directly, and the system can respond to natural language requests while performing supported file operations. The currently available commands include:
+## Usage
+Once the bot is running, you can interact with it through Telegram.
 
+Available commands include:
 - /start
 - /tools
 - /create_file
@@ -38,19 +40,28 @@ Once the application is running, the bot can be used through Telegram. Users may
 - /copy_file
 - /read_file
 - /write_file
+- /rename_file
+- /write_word_file
+- /read_word_file
+- /create_folder
+- /remove_folder
+- /list_items
+- /move_item
+- /rename_folder
+- /copy_folder
+- /zip_folder
 
-Example Usage Scenario
-----------------------
-A typical usage scenario involves a user sending a message to the bot such as "Create a file named notes.txt" or "Read the content of poem.txt". The bot processes the request, performs the relevant file action in the local tools/testdir folder, and returns a confirmation or the requested content to the user.
+Example:
+- Create a file: /create_file notes.txt
+- Read a file: /read_file notes.txt
 
-Example visualization:
+## Development Notes
+The project is currently in active development and is being refactored toward a more maintainable architecture. The explorer logic is now class-based, and tool definitions are loaded from JSON to reduce future maintenance overhead.
 
-![Example usage scenario](image.png)
+## Verification
+The current implementation has been verified with:
+- pytest -q tests/test_explorer_class.py
+- python -m py_compile server.py tools/finder/explorer_class.py
 
-Development Notes
------------------
-This project is still in development and may evolve as new capabilities are added. The current implementation focuses on establishing a reliable local interface for bot-driven file operations and conversational interaction.
-
-License
--------
+## License
 No license has been specified yet.

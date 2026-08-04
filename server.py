@@ -289,6 +289,7 @@ async def remove_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = list_items_tool()
+    # Edit result for better readability beautify the output
     await update.message.reply_text(result)
 
 
@@ -347,7 +348,7 @@ async def run_llm_with_tools(user_text: str) -> str:
             'content': (
                 'You are a friendly and conversational AI assistant for Melih Emin KILICOGLU. '
                 'You can chat naturally, answer questions, and assist with general tasks. '
-                'When the user\'s request involves managing files (such as creating, reading, deleting, or renaming), '
+                'When the user\'s request involves managing files and folders (such as creating, reading, deleting, or renaming), '
                 'proactively use the appropriate tools to fulfill the request. '
                 'Always explain the results of your actions clearly and kindly after using a tool. '
                 '\n\nSTRICT RULES FOR CONVERSATION: '
@@ -365,7 +366,7 @@ async def run_llm_with_tools(user_text: str) -> str:
 
     for _ in range(5):
         response = await client.chat(
-            model='llama3.1:8b',
+            model='Qwen3:8b',
             messages=messages,
             tools=tools,
         )
