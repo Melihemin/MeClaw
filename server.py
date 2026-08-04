@@ -63,11 +63,17 @@ def remove_folder_tool(folder_name: str) -> str:
 
 
 def list_items_tool() -> str:
-    """List files and folders available in the workspace root."""
+    """List files and folders available in the workspace root in a readable format."""
     items = explorer.list_items()
     if not items:
         return "No items found."
-    return "\n".join(f"{item['type']}: {item['name']}" for item in items)
+
+    lines = ["Workspace contents:", ""]
+    for item in items:
+        icon = "📁" if item["type"] == "dir" else "📄"
+        lines.append(f"{icon} {item['name']}")
+
+    return "\n".join(lines)
 
 
 def move_item_tool(source_path: str, destination_path: str) -> str:
@@ -88,6 +94,11 @@ def copy_folder_tool(source_folder_name: str, destination_folder_name: str) -> s
 def zip_folder_tool(folder_name: str) -> str:
     """Create a .zip archive from a folder."""
     return explorer.zip_folder(folder_name)
+
+
+def extract_archive_tool(archive_name: str, destination_folder: str) -> str:
+    """Extract a .zip archive into a destination folder."""
+    return explorer.extract_archive(archive_name, destination_folder)
 
 
 def build_tool_definitions() -> list[dict]:
@@ -155,6 +166,10 @@ async def copy_folder_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def zip_folder_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await zip_folder(update, context)
 
+
+async def extract_archive_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await extract_archive(update, context)
+
 dotenv.load_dotenv()
 
 logging.basicConfig(
@@ -168,7 +183,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Available tools: /start, /tools, /create_file, /delete_file, /read_file, /write_file, /copy_file, /rename_file, /write_word_file, /read_word_file, /create_folder, /remove_folder, /list_items, /move_item, /rename_folder, /copy_folder, /zip_folder")
+    await update.message.reply_text("Available tools: /start, /tools, /create_file, /delete_file, /read_file, /write_file, /copy_file, /rename_file, /write_word_file, /read_word_file, /create_folder, /remove_folder, /list_items, /move_item, /rename_folder, /copy_folder, /zip_folder, /extract_archive")
 
 
 async def create_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -340,6 +355,18 @@ async def zip_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(result)
 
 
+async def extract_archive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parts = update.message.text.split(' ', 2)
+    if len(parts) <= 2 or not parts[1].strip() or not parts[2].strip():
+        await update.message.reply_text("Please provide an archive name and destination folder: /extract_archive sample.zip extracted")
+        return
+
+    archive_name = parts[1].strip()
+    destination_folder = parts[2].strip()
+    result = extract_archive_tool(archive_name, destination_folder)
+    await update.message.reply_text(result)
+
+
 async def run_llm_with_tools(user_text: str) -> str:
     client = AsyncClient()
     messages = [
@@ -446,6 +473,8 @@ async def run_llm_with_tools(user_text: str) -> str:
                 return copy_folder_tool(arguments.get('source_folder_name', ''), arguments.get('destination_folder_name', ''))
             elif tool_name == 'zip_folder_tool':
                 return zip_folder_tool(arguments.get('folder_name', ''))
+            elif tool_name == 'extract_archive_tool':
+                return extract_archive_tool(arguments.get('archive_name', ''), arguments.get('destination_folder', ''))
             else:
                 tool_result = f'Unknown tool: {tool_name}'
 
@@ -520,6 +549,7 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('rename_folder', rename_folder_command))
     application.add_handler(CommandHandler('copy_folder', copy_folder_command))
     application.add_handler(CommandHandler('zip_folder', zip_folder_command))
+    application.add_handler(CommandHandler('extract_archive', extract_archive_command))
 
     message_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     application.add_handler(message_handler)

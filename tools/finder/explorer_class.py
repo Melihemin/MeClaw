@@ -234,3 +234,21 @@ class Explorer:
         except Exception as exc:
             logging.error("Zip Error: %s", exc)
             return "Failed to zip the folder."
+
+    def extract_archive(self, archive_name: str, destination_folder: str) -> str:
+        if not archive_name or not destination_folder:
+            return "Archive name or destination folder not provided."
+
+        try:
+            archive_path = self._build_path(archive_name)
+            extract_path = self._build_path(destination_folder)
+            with zipfile.ZipFile(archive_path, "r") as archive:
+                archive.extractall(extract_path)
+            return f"Archive '{archive_name}' extracted to '{destination_folder}' successfully."
+        except FileNotFoundError:
+            return f"Archive '{archive_name}' not found."
+        except zipfile.BadZipFile:
+            return f"Archive '{archive_name}' is not a valid zip file."
+        except Exception as exc:
+            logging.error("Archive Extraction Error: %s", exc)
+            return "Failed to extract the archive."

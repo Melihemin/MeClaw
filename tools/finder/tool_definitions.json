@@ -214,5 +214,20 @@
         "required": ["folder_name"]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "extract_archive_tool",
+      "description": "Extract a .zip archive into a destination folder.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "archive_name": {"type": "string"},
+          "destination_folder": {"type": "string"}
+        },
+        "required": ["archive_name", "destination_folder"]
+      }
+    }
   }
 ]

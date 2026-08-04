@@ -78,6 +78,15 @@ class ExplorerClassTests(unittest.TestCase):
         with zipfile.ZipFile(archive_path) as archive:
             self.assertIn("child.txt", archive.namelist())
 
+    def test_extract_archive(self) -> None:
+        archive_path = Path(self.temp_dir.name, "sample.zip")
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("nested/data.txt", "hello archive")
+
+        extract_result = self.explorer.extract_archive("sample.zip", "extracted")
+        self.assertIn("extracted", extract_result)
+        self.assertTrue(Path(self.temp_dir.name, "extracted", "nested", "data.txt").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
