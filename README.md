@@ -8,16 +8,20 @@ MeClaw is a local assistant project that combines a Telegram bot with file-manag
 - Class-based file and folder explorer in tools/finder/explorer_class.py
 - Tool schemas stored externally in tools/finder/tool_definitions.json
 - Support for creating, reading, writing, copying, renaming, and deleting files
-- Support for creating, listing, moving, renaming, copying, and zipping folders
+- Support for creating, listing, moving, renaming, copying, zipping, and extracting folders and archives
 - DOCX read/write support via python-docx
-- Regression tests under tests/test_explorer_class.py
+- Desktop helper app in desktop_app.py for editing environment settings and launching the bot
+- Windows startup script in start.bat and shell script in start.sh
+- Regression tests under tests/test_explorer_class.py and tests/test_desktop_env.py
 
 ## Project Structure
 - server.py: Telegram bot logic and tool wrapper functions
+- desktop_app.py: simple desktop UI for editing .env values and launching the app
 - tools/finder/explorer_class.py: main explorer implementation
 - tools/finder/tool_definitions.json: Ollama tool schema definitions
 - tools/finder/testdir/: sample workspace used by the explorer
 - tests/test_explorer_class.py: functional tests for core explorer behavior
+- tests/test_desktop_env.py: tests for environment and desktop helper logic
 
 ## Installation
 1. Clone or download the repository.
@@ -26,8 +30,22 @@ MeClaw is a local assistant project that combines a Telegram bot with file-manag
    pip install -r requirements.txt
 4. Make sure Ollama is installed and running locally.
 5. Set the Telegram bot token in the environment as TELEGRAM_API.
-6. Start the bot:
-   python server.py
+6. Optionally configure OLLAMA_HOST in the .env file.
+
+## Running the Project
+### Option 1: Start the server directly
+- Python:
+  python server.py
+
+### Option 2: Use the desktop helper
+- Python:
+  python desktop_app.py
+
+### Option 3: Use the startup scripts
+- Windows:
+  start.bat
+- Linux/macOS:
+  ./start.sh
 
 ## Usage
 Once the bot is running, you can interact with it through Telegram.
@@ -50,18 +68,25 @@ Available commands include:
 - /rename_folder
 - /copy_folder
 - /zip_folder
+- /extract_archive
 
 Example:
 - Create a file: /create_file notes.txt
 - Read a file: /read_file notes.txt
 
+## Building a Windows EXE
+A standalone Windows executable can be generated with:
+- python build_exe.py
+
+This produces the packaged file in the dist folder.
+
 ## Development Notes
-The project is currently in active development and is being refactored toward a more maintainable architecture. The explorer logic is now class-based, and tool definitions are loaded from JSON to reduce future maintenance overhead.
+The project is currently in active development and is being refactored toward a more maintainable architecture. The explorer logic is now class-based, tool definitions are loaded from JSON, and a small desktop helper is included for easier setup and launching.
 
 ## Verification
 The current implementation has been verified with:
-- pytest -q tests/test_explorer_class.py
-- python -m py_compile server.py tools/finder/explorer_class.py
+- pytest -q tests/test_explorer_class.py tests/test_desktop_env.py
+- python -m py_compile server.py tools/finder/explorer_class.py desktop_app.py
 
 ## License
 No license has been specified yet.
