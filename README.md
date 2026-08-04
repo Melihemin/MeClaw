@@ -44,8 +44,6 @@ MeClaw is a local assistant project that combines a Telegram bot with file-manag
 ### Option 3: Use the startup scripts
 - Windows:
   start.bat
-- Linux/macOS:
-  ./start.sh
 
 ## Usage
 Once the bot is running, you can interact with it through Telegram.
