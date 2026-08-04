@@ -37,11 +37,7 @@ MeClaw is a local assistant project that combines a Telegram bot with file-manag
 - Python:
   python server.py
 
-### Option 2: Use the desktop helper
-- Python:
-  python desktop_app.py
-
-### Option 3: Use the startup scripts
+### Option 2: Use the startup scripts
 - Windows:
   start.bat
 
@@ -72,19 +68,5 @@ Example:
 - Create a file: /create_file notes.txt
 - Read a file: /read_file notes.txt
 
-## Building a Windows EXE
-A standalone Windows executable can be generated with:
-- python build_exe.py
-
-This produces the packaged file in the dist folder.
-
 ## Development Notes
 The project is currently in active development and is being refactored toward a more maintainable architecture. The explorer logic is now class-based, tool definitions are loaded from JSON, and a small desktop helper is included for easier setup and launching.
-
-## Verification
-The current implementation has been verified with:
-- pytest -q tests/test_explorer_class.py tests/test_desktop_env.py
-- python -m py_compile server.py tools/finder/explorer_class.py desktop_app.py
-
-## License
-No license has been specified yet.
