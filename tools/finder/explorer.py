@@ -8,6 +8,7 @@ from docx.shared import Pt
 
 path = os.path.dirname(os.path.abspath(__file__)) + "\\testdir"
 
+# FILE MANIPULATION
 
 def create_file_tool(filename: str) -> str:
     """Create an empty file inside the tools directory.
@@ -216,6 +217,52 @@ def write_word_file_tool(filename: str, content: str, font_name: str = None, fon
         logging.error(f"Word File Write Error: {e}")
         return "Failed to write to the Word file."
 
+
+# Folder and Path MANIPULATION
+
+def create_folder_tool(folder_name: str) -> str:
+    """Create a folder inside the tools directory.
+
+    Args:
+        folder_name: Name of the folder to create.
+
+    Returns:
+        A status message describing the result.
+    """
+    if not folder_name:
+        return "No folder name provided."
+
+    try:
+        os.makedirs(os.path.join(path, folder_name), exist_ok=True)
+        return f"Folder '{folder_name}' created successfully."
+    except Exception as e:
+        logging.error(f"Folder Creation Error: {e}")
+        return "Failed to create the folder."
+
+
+def remove_folder_tool(folder_name: str) -> str:
+    """Remove a folder inside the tools directory.
+
+    Args:
+        folder_name: Name of the folder to remove.
+
+    Returns:
+        A status message describing the result.
+    """
+    if not folder_name:
+        return "No folder name provided."
+
+    try:
+        os.rmdir(os.path.join(path, folder_name))
+        return f"Folder '{folder_name}' removed successfully."
+    except FileNotFoundError:
+        return f"Folder '{folder_name}' not found."
+    except OSError as e:
+        logging.error(f"Folder Removal Error: {e}")
+        return "Failed to remove the folder. Ensure it's empty before deletion."
+
+# FILE COMMANDS
+
 async def create_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = update.message.text.split(' ', 1)
     if len(parts) <= 1 or not parts[1].strip():
@@ -299,4 +346,28 @@ async def read_word_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     filename = parts[1].strip()
     result = read_word_file_tool(filename)
+    await update.message.reply_text(result)
+
+
+# FOLDER COMMANDS
+
+async def create_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parts = update.message.text.split(' ', 1)
+    if len(parts) <= 1 or not parts[1].strip():
+        await update.message.reply_text("Please provide a folder name: /create_folder example_folder")
+        return
+
+    folder_name = parts[1].strip()
+    result = create_folder_tool(folder_name)
+    await update.message.reply_text(result)
+
+
+async def remove_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parts = update.message.text.split(' ', 1)
+    if len(parts) <= 1 or not parts[1].strip():
+        await update.message.reply_text("Please provide a folder name: /remove_folder example_folder")
+        return
+
+    folder_name = parts[1].strip()
+    result = remove_folder_tool(folder_name)
     await update.message.reply_text(result)
