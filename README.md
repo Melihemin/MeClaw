@@ -3,6 +3,9 @@
 ## Overview
 MeClaw is a local assistant project that combines a Telegram bot with file-management capabilities and an Ollama-powered conversational layer. The project is designed to let users interact with files and folders through natural language while keeping the implementation modular and extensible.
 
+<img width="1080" height="852" alt="image" src="https://github.com/user-attachments/assets/3dc5ceac-dc2d-4745-a92f-cbf835cc72b9" />
+
+
 ## Current Features
 - Telegram bot entry point in server.py
 - Class-based file and folder explorer in tools/finder/explorer_class.py
