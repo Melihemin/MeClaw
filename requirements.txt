@@ -8,3 +8,4 @@ pytest
 httpx
 pypdf>=6,<7
 openpyxl>=3.1,<4
+ddgs>=9,<10
