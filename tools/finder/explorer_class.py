@@ -12,9 +12,16 @@ from docx.shared import Pt
 class Explorer:
     """Simple class-based file and folder explorer for local operations."""
 
-    def __init__(self, base_dir: Optional[str] = None) -> None:
-        self.base_dir = Path(base_dir or os.path.join(os.path.dirname(__file__), "testdir")).resolve()
+    def __init__(self, base_dir: "str | os.PathLike[str]") -> None:
+        self.base_dir = Path(base_dir).resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
+
+    def resolve(self, name: str) -> Path:
+        """Absolute path for ``name`` inside the workspace (the root itself allowed).
+
+        Raises ValueError for paths that leave the workspace.
+        """
+        return self._build_path(name or ".", allow_root=True)
 
     def _build_path(self, name: str, allow_root: bool = False) -> Path:
         path = (self.base_dir / name).resolve()

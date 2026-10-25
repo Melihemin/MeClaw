@@ -3,20 +3,25 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable
+from urllib.parse import urlparse
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from meclaw import files
 from meclaw.agent import SYSTEM_PROMPT, run_agent
-from meclaw.config import Settings, load_settings
+from meclaw.config import DEFAULT_WORKSPACE, Settings, load_settings
 from meclaw.llm.base import Provider
 from meclaw.llm.ollama import OllamaProvider
 from meclaw.llm.openai import OpenAIProvider
@@ -34,6 +39,8 @@ DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 _KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_\-*.…]+")
 _HOST_PATTERN = re.compile(r"^https?://\S+$")
 MAX_PROMPT_LENGTH = 8000
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+LOCAL_HEADER = "X-MeClaw"
 
 # apply_settings(changes) saves {ENV_NAME: value | None} and returns the reloaded
 # settings plus freshly built providers.
@@ -54,6 +61,7 @@ class SettingsUpdate(BaseModel):
     default_provider: str | None = None
     default_model: str | None = None
     system_prompt: str | None = None
+    workspace: str | None = None
 
 
 def sse(name: str, data: dict) -> str:
@@ -65,6 +73,19 @@ def redact(text: str) -> str:
     return _KEY_PATTERN.sub("sk-***", text)
 
 
+def open_in_file_manager(path: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(path)  # noqa: S606 - local desktop action on a workspace folder
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
+
+
+def is_drive_root(path: Path) -> bool:
+    return path.resolve().parent == path.resolve()
+
+
 def create_app(
     providers: dict[str, Provider],
     registry: ToolRegistry,
@@ -72,6 +93,8 @@ def create_app(
     allowed_hosts: list[str] | None = None,
     settings: Settings | None = None,
     apply_settings: ApplySettings | None = None,
+    make_registry: Callable[[Path], ToolRegistry] | None = None,
+    open_folder: Callable[[Path], None] = open_in_file_manager,
 ) -> FastAPI:
     app = FastAPI()
     # Reject foreign Host headers so DNS rebinding cannot reach the local API.
@@ -80,7 +103,30 @@ def create_app(
     )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     # Replaced as a whole when settings are saved, so in-flight chats keep their provider.
-    state = SimpleNamespace(settings=settings, providers=providers)
+    state = SimpleNamespace(settings=settings, providers=providers, registry=registry)
+    hosts = allowed_hosts or DEFAULT_ALLOWED_HOSTS
+
+    def require_local(request: Request) -> None:
+        # Uploads and "open folder" are plain POSTs a foreign page could send blind; the
+        # custom header forces a CORS preflight that a cross-site page cannot pass.
+        if request.headers.get(LOCAL_HEADER) != "1":
+            raise HTTPException(403, detail="Forbidden")
+        origin = request.headers.get("origin")
+        if origin and urlparse(origin).hostname not in hosts:
+            raise HTTPException(403, detail="Forbidden")
+
+    def workspace_path(rel: str, *, kind: str = "any") -> Path:
+        try:
+            path = state.registry.explorer.resolve(rel)
+        except ValueError:
+            raise HTTPException(400, detail="Path is outside the workspace.")
+        if not path.exists():
+            raise HTTPException(404, detail="Not found")
+        if kind == "dir" and not path.is_dir():
+            raise HTTPException(400, detail="Not a folder")
+        if kind == "file" and not path.is_file():
+            raise HTTPException(400, detail="Not a file")
+        return path
 
     def get_provider(name: str) -> Provider:
         provider = state.providers.get(name)
@@ -126,6 +172,8 @@ def create_app(
             "default_model": s.default_model or "",
             "system_prompt": s.system_prompt or "",
             "system_prompt_default": SYSTEM_PROMPT,
+            "workspace": str(s.workspace_dir),
+            "workspace_default": str(DEFAULT_WORKSPACE),
             "providers": list(state.providers),
         }
 
@@ -163,9 +211,66 @@ def create_app(
             if len(prompt) > MAX_PROMPT_LENGTH:
                 raise HTTPException(400, detail=f"Sistem istemi en fazla {MAX_PROMPT_LENGTH} karakter olabilir.")
             changes["MECLAW_SYSTEM_PROMPT"] = None if prompt in ("", SYSTEM_PROMPT) else prompt
+        if req.workspace is not None:
+            raw = req.workspace.strip()
+            if raw:
+                folder = Path(raw)
+                if not folder.is_absolute() or is_drive_root(folder):
+                    raise HTTPException(
+                        400, detail="Çalışma klasörü tam bir yol olmalı ve sürücü kökü olamaz."
+                    )
+                try:
+                    folder.mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    raise HTTPException(400, detail=f"Klasör oluşturulamadı: {exc.strerror or exc}")
+            changes["MECLAW_WORKSPACE"] = raw or None
         if changes:
+            old_workspace = state.settings.workspace_dir
             state.settings, state.providers = apply_settings(changes)
+            if make_registry and state.settings.workspace_dir != old_workspace:
+                state.registry = make_registry(state.settings.workspace_dir)
         return settings_payload()
+
+    @app.get("/api/files")
+    def list_files(path: str = ""):
+        workspace_path(path, kind="dir")
+        return files.list_dir(state.registry.explorer, path)
+
+    @app.get("/api/files/preview")
+    def preview_file(path: str):
+        workspace_path(path, kind="file")
+        return files.preview(state.registry.explorer, path)
+
+    @app.get("/api/files/download")
+    def download_file(path: str, inline: bool = False):
+        target = workspace_path(path, kind="file")
+        return FileResponse(
+            target,
+            filename=target.name,
+            content_disposition_type="inline" if inline else "attachment",
+            headers={"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.post("/api/files/upload")
+    async def upload_file(request: Request, name: str, path: str = ""):
+        require_local(request)
+        workspace_path(path, kind="dir")
+        if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, detail="Dosya 50 MB sınırını aşıyor.")
+        data = await request.body()
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, detail="Dosya 50 MB sınırını aşıyor.")
+        try:
+            saved = files.save_upload(state.registry.explorer, path, name, data)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc))
+        return {"path": saved}
+
+    @app.post("/api/workspace/open", status_code=204)
+    def open_workspace(request: Request, path: str = ""):
+        require_local(request)
+        open_folder(workspace_path(path, kind="dir"))
+        return Response(status_code=204)
 
     @app.get("/api/conversations")
     def list_conversations():
@@ -205,13 +310,14 @@ def create_app(
         )
         history = storage.get_conversation(req.conversation_id)["messages"]
         system_prompt = (state.settings and state.settings.system_prompt) or SYSTEM_PROMPT
+        tools = state.registry
         new_messages: list[dict] = []
 
         async def gen():
             try:
                 try:
                     async for event in run_agent(
-                        provider, req.model, history, registry, new_messages, system_prompt
+                        provider, req.model, history, tools, new_messages, system_prompt
                     ):
                         if event.type == "text":
                             yield sse("text", {"text": event.text})
@@ -249,6 +355,10 @@ def build_providers(settings: Settings) -> dict[str, Provider]:
     }
 
 
+def build_registry(workspace: Path) -> ToolRegistry:
+    return ToolRegistry(Explorer(workspace))
+
+
 def apply_env_settings(changes: dict) -> tuple[Settings, dict[str, Provider]]:
     save_settings(changes)
     settings = load_settings()
@@ -259,10 +369,11 @@ def build_default_app() -> FastAPI:
     settings = load_settings()
     return create_app(
         build_providers(settings),
-        ToolRegistry(Explorer()),
+        build_registry(settings.workspace_dir),
         Storage(settings.db_path),
         settings=settings,
         apply_settings=apply_env_settings,
+        make_registry=build_registry,
     )
 
 

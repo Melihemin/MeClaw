@@ -60,3 +60,12 @@ def test_load_settings_new_fields_default_none(monkeypatch):
         monkeypatch.setenv(k, "  ")
     s = load_settings()
     assert (s.default_provider, s.default_model, s.system_prompt) == (None, None, None)
+
+
+def test_workspace_default_and_override(monkeypatch, tmp_path):
+    from meclaw.config import PROJECT_ROOT
+    monkeypatch.setattr("meclaw.config.dotenv.load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("MECLAW_WORKSPACE", raising=False)
+    assert load_settings().workspace_dir == PROJECT_ROOT / "workspace"
+    monkeypatch.setenv("MECLAW_WORKSPACE", str(tmp_path))
+    assert load_settings().workspace_dir == tmp_path

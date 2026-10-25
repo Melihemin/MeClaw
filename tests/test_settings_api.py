@@ -14,7 +14,10 @@ from tests.fakes import FakeProvider
 from tools.finder.explorer_class import Explorer
 
 KEY = "sk-test-abcdefgh12345678"
-BASE = Settings(ollama_host="http://localhost:11434", openai_api_key=None, db_path=Path("x.db"))
+BASE = Settings(
+    ollama_host="http://localhost:11434", openai_api_key=None, db_path=Path("x.db"),
+    workspace_dir=Path("C:/varsayilan/workspace"),
+)
 
 
 class Harness:
@@ -30,11 +33,13 @@ class Harness:
         fields = {
             "OLLAMA_HOST": "ollama_host", "OPENAI_API_KEY": "openai_api_key",
             "MECLAW_DEFAULT_PROVIDER": "default_provider", "MECLAW_DEFAULT_MODEL": "default_model",
-            "MECLAW_SYSTEM_PROMPT": "system_prompt",
+            "MECLAW_SYSTEM_PROMPT": "system_prompt", "MECLAW_WORKSPACE": "workspace_dir",
         }
         updates = {fields[k]: v for k, v in changes.items()}
         if updates.get("ollama_host", "") is None:
             updates["ollama_host"] = "http://localhost:11434"
+        if "workspace_dir" in updates:
+            updates["workspace_dir"] = Path(updates["workspace_dir"] or BASE.workspace_dir)
         self.settings = replace(self.settings, **updates)
         self.provider = FakeProvider(turns=[[ChatEvent("text", "ok")]])
         return self.settings, {"fake": self.provider}
@@ -46,13 +51,23 @@ def h():
 
 
 @pytest.fixture
-def client(tmp_path, h):
+def built():
+    return []
+
+
+@pytest.fixture
+def client(tmp_path, h, built):
+    def make_registry(path):
+        built.append(path)
+        return ToolRegistry(Explorer(base_dir=str(path)))
+
     app = create_app(
         {"fake": h.provider},
         ToolRegistry(Explorer(base_dir=str(tmp_path / "ws"))),
         Storage(tmp_path / "t.db"),
         settings=BASE,
         apply_settings=h.apply,
+        make_registry=make_registry,
     )
     return TestClient(app, base_url="http://127.0.0.1")
 
@@ -134,3 +149,36 @@ def test_settings_unavailable_without_apply(tmp_path):
     c = TestClient(app, base_url="http://127.0.0.1")
     assert c.get("/api/settings").status_code == 404
     assert c.put("/api/settings", json={}).status_code == 404
+
+
+def test_workspace_in_payload(client):
+    data = client.get("/api/settings").json()
+    assert Path(data["workspace"]) == BASE.workspace_dir
+
+
+def test_workspace_change_rebuilds_tools(client, h, built, tmp_path):
+    new = tmp_path / "yeni alan"
+    r = client.put("/api/settings", json={"workspace": str(new)})
+    assert r.status_code == 200
+    assert h.calls[-1] == {"MECLAW_WORKSPACE": str(new)}
+    assert new.is_dir() and built == [new]
+    assert Path(r.json()["workspace"]) == new
+    listing = client.get("/api/files").json()
+    assert listing["entries"] == []
+
+
+def test_same_workspace_does_not_rebuild(client, built, tmp_path):
+    client.put("/api/settings", json={"workspace": str(tmp_path / "a")})
+    client.put("/api/settings", json={"default_model": "m"})
+    assert len(built) == 1
+
+
+def test_blank_workspace_resets_to_default(client, h):
+    client.put("/api/settings", json={"workspace": ""})
+    assert h.calls[-1] == {"MECLAW_WORKSPACE": None}
+
+
+@pytest.mark.parametrize("value", ["goreli/klasor", "C:\\", "/"])
+def test_bad_workspace_rejected(client, h, value):
+    assert client.put("/api/settings", json={"workspace": value}).status_code == 400
+    assert h.calls == []

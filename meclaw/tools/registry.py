@@ -23,6 +23,10 @@ class ToolRegistry:
             self._definitions: list[dict] = json.load(f)
         self._names = {d["function"]["name"] for d in self._definitions}
 
+    @property
+    def explorer(self) -> Explorer:
+        return self._explorer
+
     def definitions(self) -> list[dict]:
         return list(self._definitions)
 
