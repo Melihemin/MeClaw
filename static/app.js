@@ -1,18 +1,57 @@
 "use strict";
 
+const $ = (id) => document.getElementById(id);
+
 const els = {
-  newChat: document.getElementById("new-chat"),
-  convList: document.getElementById("conv-list"),
-  provider: document.getElementById("provider"),
-  model: document.getElementById("model"),
-  note: document.getElementById("model-note"),
-  messages: document.getElementById("messages"),
-  composer: document.getElementById("composer"),
-  input: document.getElementById("input"),
-  send: document.getElementById("send"),
+  app: $("app"),
+  main: $("main"),
+  newChat: $("new-chat"),
+  newChatTop: $("new-chat-top"),
+  convList: $("conv-list"),
+  openSidebar: $("open-sidebar"),
+  closeSidebar: $("close-sidebar"),
+  scrim: $("scrim"),
+  modelButton: $("model-button"),
+  modelLabel: $("model-label"),
+  modelMenu: $("model-menu"),
+  banner: $("banner"),
+  bannerText: $("banner-text"),
+  bannerSettings: $("banner-settings"),
+  thread: $("thread"),
+  messages: $("messages"),
+  composer: $("composer"),
+  input: $("input"),
+  send: $("send"),
+  openSettings: $("open-settings"),
+  dialog: $("settings"),
+  settingsForm: $("settings-form"),
+  settingsClose: $("settings-close"),
+  settingsCancel: $("settings-cancel"),
+  settingsSave: $("settings-save"),
+  settingsStatus: $("settings-status"),
+  setTheme: $("set-theme"),
+  setOllama: $("set-ollama"),
+  setKey: $("set-key"),
+  keyStatus: $("key-status"),
+  clearKey: $("clear-key"),
+  setDefaultProvider: $("set-default-provider"),
+  setDefaultModel: $("set-default-model"),
+  knownModels: $("known-models"),
+  setPrompt: $("set-prompt"),
+  resetPrompt: $("reset-prompt"),
 };
 
-const state = { conversationId: null, busy: false, modelsToken: 0, unavailable: [] };
+const state = {
+  conversationId: null,
+  busy: false,
+  providers: [],      // [{name, ready, reason}]
+  models: {},         // provider name -> [model]
+  modelErrors: {},    // provider name -> message
+  provider: "",
+  model: "",
+  settings: null,     // GET /api/settings payload, or null when unavailable
+  clearKey: false,
+};
 
 // ---------- storage helpers ----------
 
@@ -21,6 +60,18 @@ function storeGet(key) {
 }
 function storeSet(key, value) {
   try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
+}
+
+// ---------- theme ----------
+
+function currentTheme() {
+  const t = storeGet("meclaw.theme");
+  return t === "light" || t === "dark" ? t : "system";
+}
+
+function applyTheme(theme) {
+  if (theme === "light" || theme === "dark") document.documentElement.setAttribute("data-theme", theme);
+  else document.documentElement.removeAttribute("data-theme");
 }
 
 // ---------- markdown ----------
@@ -50,7 +101,7 @@ function renderBlockText(escaped) {
   let listTag = "ul";
   let para = [];
   const flushPara = () => {
-    if (para.length) { out.push(para.join("<br>")); para = []; }
+    if (para.length) { out.push("<p>" + para.join("<br>") + "</p>"); para = []; }
   };
   const flushList = () => {
     if (list) { out.push("<" + listTag + ">" + list.join("") + "</" + listTag + ">"); list = null; }
@@ -63,6 +114,9 @@ function renderBlockText(escaped) {
       if (list && listTag !== tag) flushList();
       listTag = tag;
       (list = list || []).push("<li>" + renderInline(m[3]) + "</li>");
+    } else if (!line.trim()) {
+      flushList();
+      flushPara();
     } else {
       flushList();
       para.push(renderInline(line));
@@ -88,28 +142,20 @@ function renderMarkdown(text) {
 // ---------- message rendering ----------
 
 function scrollToBottom() {
-  els.messages.scrollTop = els.messages.scrollHeight;
+  els.thread.scrollTop = els.thread.scrollHeight;
 }
 
-function clearMessages() {
-  els.messages.textContent = "";
+function setEmpty(empty) {
+  els.main.classList.toggle("is-empty", empty);
 }
 
 function showEmpty() {
-  clearMessages();
-  const d = document.createElement("div");
-  d.className = "empty";
-  d.textContent = "Bir sohbet başlatın.";
-  els.messages.appendChild(d);
-}
-
-function removeEmpty() {
-  const e = els.messages.querySelector(".empty");
-  if (e) e.remove();
+  els.messages.textContent = "";
+  setEmpty(true);
 }
 
 function addUserBubble(text) {
-  removeEmpty();
+  setEmpty(false);
   const d = document.createElement("div");
   d.className = "msg user";
   d.textContent = text;
@@ -119,7 +165,7 @@ function addUserBubble(text) {
 }
 
 function addAssistantBubble(text) {
-  removeEmpty();
+  setEmpty(false);
   const d = document.createElement("div");
   d.className = "msg assistant";
   d._raw = text || "";
@@ -136,11 +182,11 @@ function appendAssistantText(bubble, text) {
 }
 
 function addToolTag(name, result) {
-  removeEmpty();
+  setEmpty(false);
   const det = document.createElement("details");
   det.className = "tool";
   const sum = document.createElement("summary");
-  sum.textContent = "Araç: " + (name || "?");
+  sum.textContent = "🛠 " + (name || "araç");
   const pre = document.createElement("pre");
   pre.textContent = result == null ? "" : String(result);
   det.appendChild(sum);
@@ -150,17 +196,18 @@ function addToolTag(name, result) {
 }
 
 function addErrorLine(message) {
-  removeEmpty();
+  setEmpty(false);
   const d = document.createElement("div");
   d.className = "error-line";
-  d.textContent = "Hata: " + message;
+  d.textContent = message;
   els.messages.appendChild(d);
   scrollToBottom();
 }
 
 function renderHistory(messages) {
-  clearMessages();
+  els.messages.textContent = "";
   if (!messages || !messages.length) { showEmpty(); return; }
+  setEmpty(false);
   for (const m of messages) {
     if (m.role === "user") addUserBubble(m.content || "");
     else if (m.role === "assistant") {
@@ -186,75 +233,179 @@ async function api(path, options) {
 
 // ---------- providers / models ----------
 
+function isUsable(provider, model) {
+  return Boolean(provider && model && (state.models[provider] || []).includes(model));
+}
+
+function firstUsable() {
+  for (const p of state.providers) {
+    const list = state.models[p.name] || [];
+    if (list.length) return { provider: p.name, model: list[0] };
+  }
+  return null;
+}
+
+function defaultSelection() {
+  const s = state.settings;
+  if (s && s.default_provider) {
+    const list = state.models[s.default_provider] || [];
+    if (isUsable(s.default_provider, s.default_model)) return { provider: s.default_provider, model: s.default_model };
+    if (!s.default_model && list.length) return { provider: s.default_provider, model: list[0] };
+  }
+  const p = storeGet("meclaw.provider");
+  const m = storeGet("meclaw.model");
+  if (isUsable(p, m)) return { provider: p, model: m };
+  return firstUsable();
+}
+
+function setSelection(provider, model) {
+  state.provider = provider || "";
+  state.model = model || "";
+  els.modelLabel.textContent = state.model ? state.model : "Model seçin";
+  els.modelButton.title = state.provider ? state.provider + " · " + state.model : "";
+  if (state.provider && state.model) {
+    storeSet("meclaw.provider", state.provider);
+    storeSet("meclaw.model", state.model);
+  }
+}
+
+function applyDefaultSelection() {
+  const pick = defaultSelection();
+  setSelection(pick ? pick.provider : "", pick ? pick.model : "");
+}
+
 async function loadProviders() {
   let providers = [];
   try {
     providers = await api("/api/providers");
   } catch (e) {
-    addErrorLine("Sağlayıcılar yüklenemedi: " + e.message);
-  }
-  els.provider.textContent = "";
-  state.unavailable = providers
-    .filter((p) => !p.ready && p.reason)
-    .map((p) => p.name + ": " + p.reason);
-  for (const p of providers) {
-    const opt = document.createElement("option");
-    opt.value = p.name;
-    opt.textContent = p.ready ? p.name : p.name + " (kullanılamıyor)";
-    opt.disabled = !p.ready;
-    if (!p.ready && p.reason) opt.title = p.reason;
-    els.provider.appendChild(opt);
-  }
-  const stored = storeGet("meclaw.provider");
-  const usable = (n) => providers.find((p) => p.name === n && p.ready);
-  const first = providers.find((p) => p.ready);
-  const pick = usable(stored) ? stored : first ? first.name : providers.length ? providers[0].name : "";
-  if (pick) els.provider.value = pick;
-  await loadModels(pick === stored ? storeGet("meclaw.model") : null);
-}
-
-function setNote(text) {
-  // Reasons for unavailable providers are not visible on disabled <option>s, so show them here.
-  const full = [text].concat(state.unavailable).filter(Boolean).join(" · ");
-  els.note.textContent = full;
-  els.note.hidden = !full;
-}
-
-async function loadModels(preferModel) {
-  const token = ++state.modelsToken;
-  const provider = els.provider.value;
-  els.model.textContent = "";
-  setNote("");
-  if (!provider) return;
-  let models;
-  try {
-    const data = await api("/api/models?provider=" + encodeURIComponent(provider));
-    models = data.models || [];
-  } catch (e) {
-    if (token === state.modelsToken) setNote(e.message);
+    state.providers = [];
+    renderBanner("Sağlayıcılar yüklenemedi: " + e.message);
     return;
   }
-  if (token !== state.modelsToken) return;
-  for (const m of models) {
-    const opt = document.createElement("option");
-    opt.value = m;
-    opt.textContent = m;
-    els.model.appendChild(opt);
-  }
-  if (preferModel && models.includes(preferModel)) els.model.value = preferModel;
-  else if (models.length) els.model.value = models[0];
-  setNote("");
+  state.providers = providers;
+  state.models = {};
+  state.modelErrors = {};
+  await Promise.all(providers.filter((p) => p.ready).map(async (p) => {
+    try {
+      const data = await api("/api/models?provider=" + encodeURIComponent(p.name));
+      state.models[p.name] = data.models || [];
+      if (!state.models[p.name].length) state.modelErrors[p.name] = "Yüklü model yok.";
+    } catch (e) {
+      state.modelErrors[p.name] = e.message;
+    }
+  }));
+  renderBanner();
 }
 
-els.provider.addEventListener("change", async () => {
-  storeSet("meclaw.provider", els.provider.value);
-  await loadModels(null);
-  if (els.model.value) storeSet("meclaw.model", els.model.value);
+function providerReason(p) {
+  if (!p.ready) return p.reason || "Kullanılamıyor.";
+  return state.modelErrors[p.name] || "";
+}
+
+function renderBanner(text) {
+  let message = text || "";
+  if (!message && state.providers.length && !firstUsable()) {
+    message = "Kullanılabilir model yok. " + state.providers
+      .map((p) => p.name + ": " + providerReason(p))
+      .join(" · ");
+  }
+  els.bannerText.textContent = message;
+  els.banner.hidden = !message;
+}
+
+function renderModelMenu() {
+  const menu = els.modelMenu;
+  menu.textContent = "";
+  state.providers.forEach((p, index) => {
+    if (index) {
+      const sep = document.createElement("div");
+      sep.className = "menu-sep";
+      menu.appendChild(sep);
+    }
+    const head = document.createElement("div");
+    head.className = "menu-head";
+    head.textContent = p.name;
+    menu.appendChild(head);
+    const models = state.models[p.name] || [];
+    for (const m of models) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "menu-item";
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", String(p.name === state.provider && m === state.model));
+      const label = document.createElement("span");
+      label.textContent = m;
+      const check = document.createElement("span");
+      check.className = "check";
+      check.textContent = "✓";
+      item.appendChild(label);
+      item.appendChild(check);
+      item.addEventListener("click", () => {
+        setSelection(p.name, m);
+        closeModelMenu();
+      });
+      menu.appendChild(item);
+    }
+    const reason = providerReason(p);
+    if (reason) {
+      const r = document.createElement("div");
+      r.className = "menu-reason";
+      r.textContent = reason;
+      menu.appendChild(r);
+    }
+  });
+  const sep = document.createElement("div");
+  sep.className = "menu-sep";
+  menu.appendChild(sep);
+  const settings = document.createElement("button");
+  settings.type = "button";
+  settings.className = "menu-item";
+  settings.textContent = "Sağlayıcı ayarları…";
+  settings.addEventListener("click", () => { closeModelMenu(); openSettings(); });
+  menu.appendChild(settings);
+}
+
+function openModelMenu() {
+  renderModelMenu();
+  els.modelMenu.hidden = false;
+  els.modelButton.setAttribute("aria-expanded", "true");
+}
+
+function closeModelMenu() {
+  els.modelMenu.hidden = true;
+  els.modelButton.setAttribute("aria-expanded", "false");
+}
+
+els.modelButton.addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  if (els.modelMenu.hidden) openModelMenu(); else closeModelMenu();
 });
 
-els.model.addEventListener("change", () => {
-  if (els.model.value) storeSet("meclaw.model", els.model.value);
+document.addEventListener("click", (ev) => {
+  if (!els.modelMenu.hidden && !els.modelMenu.contains(ev.target)) closeModelMenu();
 });
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && !els.modelMenu.hidden) closeModelMenu();
+});
+
+// ---------- sidebar ----------
+
+const mobile = window.matchMedia("(max-width: 767px)");
+
+function toggleSidebar(open) {
+  if (mobile.matches) els.app.classList.toggle("sidebar-open", open);
+  else els.app.classList.toggle("sidebar-collapsed", !open);
+}
+
+els.openSidebar.addEventListener("click", () => toggleSidebar(true));
+els.closeSidebar.addEventListener("click", () => toggleSidebar(false));
+els.scrim.addEventListener("click", () => toggleSidebar(false));
+
+function closeSidebarOnMobile() {
+  if (mobile.matches) els.app.classList.remove("sidebar-open");
+}
 
 // ---------- conversations ----------
 
@@ -274,6 +425,7 @@ async function refreshConversations() {
     del.className = "conv-delete";
     del.textContent = "×";
     del.title = "Sohbeti sil";
+    del.setAttribute("aria-label", "Sohbeti sil");
     del.addEventListener("click", (ev) => { ev.stopPropagation(); deleteConversation(c); });
     li.appendChild(title);
     li.appendChild(del);
@@ -286,7 +438,9 @@ function newChat() {
   if (state.busy) return;
   state.conversationId = null;
   showEmpty();
+  applyDefaultSelection();
   refreshConversations();
+  closeSidebarOnMobile();
   els.input.focus();
 }
 
@@ -297,16 +451,9 @@ async function openConversation(id) {
   catch (e) { addErrorLine(e.message); return; }
   state.conversationId = conv.id;
   renderHistory(conv.messages);
-  if (conv.provider) {
-    const opt = Array.from(els.provider.options).find((o) => o.value === conv.provider && !o.disabled);
-    if (opt) {
-      els.provider.value = conv.provider;
-      await loadModels(conv.model || null);
-    }
-  } else if (conv.model && Array.from(els.model.options).some((o) => o.value === conv.model)) {
-    els.model.value = conv.model;
-  }
+  if (isUsable(conv.provider, conv.model)) setSelection(conv.provider, conv.model);
   refreshConversations();
+  closeSidebarOnMobile();
 }
 
 async function deleteConversation(c) {
@@ -323,9 +470,18 @@ async function deleteConversation(c) {
 
 // ---------- chat ----------
 
+function updateSendState() {
+  els.send.disabled = state.busy || !els.input.value.trim();
+}
+
 function setBusy(busy) {
   state.busy = busy;
-  els.send.disabled = busy;
+  updateSendState();
+}
+
+function autosize() {
+  els.input.style.height = "auto";
+  els.input.style.height = Math.min(els.input.scrollHeight, 200) + "px";
 }
 
 function parseSse(block) {
@@ -343,18 +499,25 @@ async function sendMessage() {
   if (state.busy) return;
   const text = els.input.value;
   if (!text.trim()) return;
-  const provider = els.provider.value;
-  const model = els.model.value;
-  if (!provider || !model) { addErrorLine("Önce bir sağlayıcı ve model seçin."); return; }
+  if (!state.provider || !state.model) {
+    addErrorLine("Önce bir model seçin. Model yoksa Ayarlar'dan OpenAI anahtarı ekleyin ya da Ollama'yı başlatın.");
+    return;
+  }
+  const provider = state.provider;
+  const model = state.model;
 
   setBusy(true);
+  let bubble = null;
   try {
     if (!state.conversationId) {
       const conv = await api("/api/conversations", { method: "POST" });
       state.conversationId = conv.id;
     }
     els.input.value = "";
+    autosize();
     addUserBubble(text);
+    bubble = addAssistantBubble("");
+    bubble.classList.add("typing");
 
     const res = await fetch("/api/chat", {
       method: "POST",
@@ -371,26 +534,35 @@ async function sendMessage() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let bubble = null;
+    const settle = () => {
+      // Drop an empty "typing" placeholder; keep a bubble that already has text.
+      if (bubble) {
+        bubble.classList.remove("typing");
+        if (!bubble._raw) bubble.remove();
+      }
+      bubble = null;
+    };
     const handle = (ev) => {
       if (!ev) return;
       if (ev.name === "text") {
-        if (!bubble) bubble = addAssistantBubble("");
+        if (!bubble) { bubble = addAssistantBubble(""); bubble.classList.add("typing"); }
         appendAssistantText(bubble, ev.data.text || "");
       } else if (ev.name === "tool") {
-        bubble = null;
+        settle();
         addToolTag(ev.data.name, ev.data.result);
       } else if (ev.name === "error") {
-        bubble = null;
+        settle();
         addErrorLine(ev.data.message || "Bilinmeyen hata");
       } else if (ev.name === "done") {
+        settle();
         refreshConversations();
       }
     };
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
       let idx;
       while ((idx = buffer.indexOf("\n\n")) !== -1) {
         const block = buffer.slice(0, idx);
@@ -400,9 +572,14 @@ async function sendMessage() {
     }
     buffer += decoder.decode();
     if (buffer.trim()) handle(parseSse(buffer));
+    settle();
   } catch (e) {
     addErrorLine(e.message);
   } finally {
+    if (bubble) {
+      bubble.classList.remove("typing");
+      if (!bubble._raw) bubble.remove();
+    }
     setBusy(false);
     refreshConversations();
     els.input.focus();
@@ -418,9 +595,158 @@ els.input.addEventListener("keydown", (ev) => {
   }
 });
 
+els.input.addEventListener("input", () => { autosize(); updateSendState(); });
+
 els.newChat.addEventListener("click", newChat);
+els.newChatTop.addEventListener("click", newChat);
+
+// ---------- settings ----------
+
+function setSettingsStatus(text, isError) {
+  els.settingsStatus.textContent = text || "";
+  els.settingsStatus.classList.toggle("error", Boolean(isError));
+}
+
+function renderKeyStatus() {
+  const s = state.settings;
+  if (state.clearKey) {
+    els.keyStatus.textContent = "Anahtar kaydedince silinecek.";
+    els.clearKey.textContent = "Vazgeç";
+  } else {
+    els.keyStatus.textContent = s && s.openai_key_set
+      ? "Tanımlı (" + (s.openai_key_hint || "gizli") + "). Değiştirmek için yeni anahtar girin."
+      : "Tanımlı değil.";
+    els.clearKey.textContent = "Anahtarı sil";
+  }
+  els.clearKey.hidden = !(s && s.openai_key_set);
+  els.setKey.placeholder = s && s.openai_key_set ? "•••••••• (değiştirmek için yazın)" : "sk-...";
+}
+
+function fillSettingsForm() {
+  const s = state.settings;
+  els.setTheme.value = currentTheme();
+  els.setKey.value = "";
+  state.clearKey = false;
+  const serverFields = [els.setOllama, els.setKey, els.setDefaultProvider, els.setDefaultModel, els.setPrompt,
+    els.clearKey, els.resetPrompt];
+  serverFields.forEach((el) => { el.disabled = !s; });
+  if (!s) {
+    setSettingsStatus("Sunucu ayarları bu ortamda düzenlenemiyor.", true);
+    return;
+  }
+  els.setOllama.value = s.ollama_host || "";
+  renderKeyStatus();
+
+  els.setDefaultProvider.textContent = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "Son kullanılan";
+  els.setDefaultProvider.appendChild(none);
+  for (const name of s.providers || []) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    els.setDefaultProvider.appendChild(opt);
+  }
+  els.setDefaultProvider.value = s.default_provider || "";
+  els.setDefaultModel.value = s.default_model || "";
+  fillKnownModels();
+
+  els.setPrompt.value = s.system_prompt || s.system_prompt_default || "";
+}
+
+function fillKnownModels() {
+  els.knownModels.textContent = "";
+  const provider = els.setDefaultProvider.value;
+  const names = provider ? [provider] : Object.keys(state.models);
+  for (const name of names) {
+    for (const m of state.models[name] || []) {
+      const opt = document.createElement("option");
+      opt.value = m;
+      els.knownModels.appendChild(opt);
+    }
+  }
+}
+
+async function openSettings() {
+  closeSidebarOnMobile();
+  setSettingsStatus("");
+  try { state.settings = await api("/api/settings"); }
+  catch (e) { state.settings = null; }
+  fillSettingsForm();
+  if (typeof els.dialog.showModal === "function") els.dialog.showModal();
+  else els.dialog.setAttribute("open", "");
+}
+
+function closeSettings() {
+  applyTheme(currentTheme());  // undo an unsaved theme preview
+  els.dialog.close();
+}
+
+els.openSettings.addEventListener("click", openSettings);
+els.bannerSettings.addEventListener("click", openSettings);
+els.settingsClose.addEventListener("click", closeSettings);
+els.settingsCancel.addEventListener("click", closeSettings);
+els.dialog.addEventListener("cancel", (ev) => { ev.preventDefault(); closeSettings(); });
+els.setTheme.addEventListener("change", () => applyTheme(els.setTheme.value));
+els.setDefaultProvider.addEventListener("change", fillKnownModels);
+
+els.clearKey.addEventListener("click", () => {
+  state.clearKey = !state.clearKey;
+  if (state.clearKey) els.setKey.value = "";
+  renderKeyStatus();
+});
+
+els.resetPrompt.addEventListener("click", () => {
+  if (state.settings) els.setPrompt.value = state.settings.system_prompt_default || "";
+});
+
+els.settingsForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const theme = els.setTheme.value;
+  storeSet("meclaw.theme", theme);
+  applyTheme(theme);
+  if (!state.settings) { els.dialog.close(); return; }
+
+  const payload = {
+    ollama_host: els.setOllama.value,
+    default_provider: els.setDefaultProvider.value,
+    default_model: els.setDefaultModel.value,
+    system_prompt: els.setPrompt.value,
+    clear_openai_api_key: state.clearKey,
+  };
+  if (!state.clearKey && els.setKey.value.trim()) payload.openai_api_key = els.setKey.value.trim();
+
+  els.settingsSave.disabled = true;
+  setSettingsStatus("Kaydediliyor…");
+  try {
+    state.settings = await api("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    setSettingsStatus(e.message, true);
+    return;
+  } finally {
+    els.settingsSave.disabled = false;
+    els.setKey.value = "";
+  }
+  els.dialog.close();
+  await loadProviders();
+  if (!isUsable(state.provider, state.model) || !state.conversationId) applyDefaultSelection();
+});
 
 // ---------- init ----------
 
-showEmpty();
-loadProviders().then(refreshConversations);
+async function init() {
+  applyTheme(currentTheme());
+  showEmpty();
+  updateSendState();
+  try { state.settings = await api("/api/settings"); } catch (e) { state.settings = null; }
+  await loadProviders();
+  applyDefaultSelection();
+  await refreshConversations();
+}
+
+init();

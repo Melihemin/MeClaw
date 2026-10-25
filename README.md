@@ -7,8 +7,9 @@ MeClaw is a local assistant that runs as a small web app. You chat with it in yo
 
 
 ## Features
-- Local web interface (FastAPI backend, static HTML/JS/CSS frontend, Turkish UI)
+- Local web interface in a ChatGPT-like layout (FastAPI backend, static HTML/JS/CSS frontend, Turkish UI)
 - Provider choice (Ollama or OpenAI) and model selection from the UI
+- Settings dialog that edits .env and applies changes without a restart: Ollama address, OpenAI API key (never shown back), default provider/model, system prompt, and light/dark/system theme
 - Streaming replies
 - Chat history stored in SQLite (data/meclaw.db)
 - 16 file and folder tools, restricted to the workspace folder tools/finder/testdir:
@@ -21,6 +22,7 @@ MeClaw is a local assistant that runs as a small web app. You chat with it in yo
 - server.py: FastAPI server (chat API and static file hosting)
 - meclaw/: application package
   - config.py: settings loaded from .env
+  - settings_store.py: writes settings changes back to .env
   - agent.py: chat loop with tool calling
   - storage.py: SQLite conversation storage
   - llm/: provider layer (base.py, ollama.py, openai.py)
@@ -37,10 +39,12 @@ MeClaw is a local assistant that runs as a small web app. You chat with it in yo
 2. Create and activate a Python environment if desired.
 3. Install dependencies:
    pip install -r requirements.txt
-4. Copy .env.example to .env and edit it:
+4. Configure the app either from the Settings dialog (⚙ Ayarlar in the sidebar) or by copying .env.example to .env and editing it:
    - OLLAMA_HOST: Ollama address (default http://localhost:11434). Install and run Ollama to use local models.
    - OPENAI_API_KEY: required only to use the OpenAI provider.
-   - MECLAW_DB_PATH (optional): custom path for the SQLite database.
+   - MECLAW_DEFAULT_PROVIDER / MECLAW_DEFAULT_MODEL (optional): provider and model new chats start with.
+   - MECLAW_SYSTEM_PROMPT (optional): custom system prompt; the built-in prompt is used when empty.
+   - MECLAW_DB_PATH (optional): custom path for the SQLite database (restart required).
 
 ## Running the Project
 - Windows: run start.bat (installs dependencies, starts Ollama if available, starts the server, and opens the browser).
