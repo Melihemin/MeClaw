@@ -23,7 +23,7 @@ MeClaw is a local assistant that runs as a small web app. You chat with it in yo
   - Utilities: current date, time and weekday; a safe calculator for arithmetic expressions (no eval)
   - Web (on by default, toggle in Settings or MECLAW_INTERNET): fetch_url reads a public http/https page as text, and web_search runs a DuckDuckGo search. Local, private and LAN addresses are blocked.
   - Memory (on by default, toggle in Settings or MECLAW_MEMORY): remember and forget durable facts about you. Saved notes are stored in SQLite and the most recent ones are added to the system prompt.
-- Destructive or overwriting actions ask for confirmation first: deleting files or folders, overwriting or moving over existing items, zipping over an existing archive, extracting into a non-empty folder, editing a file, and writing a spreadsheet. The chat shows a confirmation card with a preview, and the change runs only after you approve it.
+- Destructive or overwriting actions ask for confirmation first: deleting files or folders, overwriting or moving over existing items, zipping over an existing archive, extracting into a non-empty folder, editing a file, and overwriting an existing spreadsheet. The chat shows a confirmation card with a preview, and the change runs only after you approve it.
 - Tool results longer than 20,000 characters are truncated.
 
 ## Project Structure

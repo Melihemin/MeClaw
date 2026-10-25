@@ -214,8 +214,8 @@ const DENIED_PREFIX = "Denied by the user:";
 // One label for a tool call, used for live events and for history alike.
 function toolLabel(name, result) {
   const n = name || "araç";
-  if (n === "remember") return "📝 Hafıza güncellendi";
-  if (n === "forget") return "📝 Hafızadan silindi";
+  if (n === "remember" && typeof result === "string" && result.startsWith("Saved memory")) return "📝 Hafıza güncellendi";
+  if (n === "forget" && typeof result === "string" && result.startsWith("Forgot memory")) return "📝 Hafızadan silindi";
   if (typeof result === "string" && result.startsWith(DENIED_PREFIX)) return "🚫 " + n;
   if (n === "fetch_url" || n === "web_search") return "🌐 " + n;
   return "🛠 " + n;
