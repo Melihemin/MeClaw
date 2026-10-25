@@ -11,7 +11,7 @@ def test_definitions_shape_and_names(tmp_path):
     reg = make_registry(tmp_path)
     names = {d["function"]["name"] for d in reg.definitions()}
     assert names == reg.names() and {"create_file", "list_items", "read_file"} <= names
-    assert len(names) == 19
+    assert len(names) == 22
     assert all(not n.endswith("_tool") for n in names)
     assert all(d["type"] == "function" and d["function"]["parameters"]["type"] == "object" for d in reg.definitions())
 

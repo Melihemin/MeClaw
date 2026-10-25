@@ -6,3 +6,5 @@ uvicorn
 openai>=3.37,<4
 pytest
 httpx
+pypdf>=6,<7
+openpyxl>=3.1,<4
