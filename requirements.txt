@@ -3,3 +3,8 @@ python-dotenv
 ollama
 requests
 python-docx
+fastapi
+uvicorn
+openai
+pytest
+httpx

@@ -17,7 +17,10 @@ class Explorer:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _build_path(self, name: str) -> Path:
-        return self.base_dir / name
+        path = (self.base_dir / name).resolve()
+        if not path.is_relative_to(self.base_dir):
+            raise ValueError("Path is outside the workspace.")
+        return path
 
     def create_file(self, filename: str) -> str:
         if not filename:
@@ -27,6 +30,8 @@ class Explorer:
             path = self._build_path(filename)
             path.touch(exist_ok=True)
             return f"File '{filename}' created successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except Exception as exc:
             logging.error("File Creation Error: %s", exc)
             return "Failed to create the file."
@@ -39,6 +44,8 @@ class Explorer:
             path = self._build_path(filename)
             path.unlink(missing_ok=True)
             return f"File '{filename}' deleted successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except Exception as exc:
             logging.error("File Deletion Error: %s", exc)
             return "Failed to delete the file."
@@ -52,6 +59,8 @@ class Explorer:
             destination_path = self._build_path(destination_filename)
             destination_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
             return f"File '{source_filename}' copied to '{destination_filename}' successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"File '{source_filename}' not found."
         except Exception as exc:
@@ -64,6 +73,8 @@ class Explorer:
 
         try:
             return self._build_path(filename).read_text(encoding="utf-8")
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"File '{filename}' not found."
         except Exception as exc:
@@ -77,6 +88,8 @@ class Explorer:
         try:
             self._build_path(filename).write_text(content, encoding="utf-8")
             return f"Content written to '{filename}' successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except Exception as exc:
             logging.error("File Write Error: %s", exc)
             return "Failed to write to the file."
@@ -90,6 +103,8 @@ class Explorer:
             new_path = self._build_path(new_filename)
             old_path.rename(new_path)
             return f"File '{old_filename}' renamed to '{new_filename}' successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"File '{old_filename}' not found."
         except Exception as exc:
@@ -103,6 +118,8 @@ class Explorer:
         try:
             doc = Document(self._build_path(filename))
             return "\n".join(para.text for para in doc.paragraphs)
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"File '{filename}' not found."
         except Exception as exc:
@@ -130,6 +147,8 @@ class Explorer:
                     run.font.size = Pt(font_size)
             doc.save(self._build_path(filename))
             return f"Content written to '{filename}' successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except Exception as exc:
             logging.error("Word File Write Error: %s", exc)
             return "Failed to write to the Word file."
@@ -142,6 +161,8 @@ class Explorer:
             folder_path = self._build_path(folder_name)
             folder_path.mkdir(parents=True, exist_ok=True)
             return f"Folder '{folder_name}' created successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except Exception as exc:
             logging.error("Folder Creation Error: %s", exc)
             return "Failed to create the folder."
@@ -154,6 +175,8 @@ class Explorer:
             folder_path = self._build_path(folder_name)
             folder_path.rmdir()
             return f"Folder '{folder_name}' removed successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"Folder '{folder_name}' not found."
         except OSError as exc:
@@ -181,6 +204,8 @@ class Explorer:
             destination.parent.mkdir(parents=True, exist_ok=True)
             source.rename(destination)
             return f"Item '{source_path}' moved to '{destination_path}' successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"Item '{source_path}' not found."
         except Exception as exc:
@@ -196,6 +221,8 @@ class Explorer:
             new_path = self._build_path(new_folder_name)
             old_path.rename(new_path)
             return f"Folder '{old_folder_name}' renamed to '{new_folder_name}' successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"Folder '{old_folder_name}' not found."
         except Exception as exc:
@@ -211,6 +238,8 @@ class Explorer:
             destination_path = self._build_path(destination_folder_name)
             shutil.copytree(source_path, destination_path, dirs_exist_ok=True)
             return f"Folder '{source_folder_name}' copied to '{destination_folder_name}' successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"Folder '{source_folder_name}' not found."
         except Exception as exc:
@@ -229,6 +258,8 @@ class Explorer:
                     if file_path.is_file():
                         archive.write(file_path, file_path.relative_to(folder_path))
             return f"Folder '{folder_name}' zipped successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"Folder '{folder_name}' not found."
         except Exception as exc:
@@ -245,6 +276,8 @@ class Explorer:
             with zipfile.ZipFile(archive_path, "r") as archive:
                 archive.extractall(extract_path)
             return f"Archive '{archive_name}' extracted to '{destination_folder}' successfully."
+        except ValueError:
+            return "Path is outside the workspace."
         except FileNotFoundError:
             return f"Archive '{archive_name}' not found."
         except zipfile.BadZipFile:
