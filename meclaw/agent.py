@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator, Literal
 
 from meclaw.llm.base import Provider, ToolCall
-from meclaw.tools.registry import ToolRegistry
+from meclaw.tools.base import ToolRegistry
 
 SYSTEM_PROMPT = (
     'You are a friendly and conversational AI assistant for Melih Emin KILICOGLU. '
@@ -72,7 +72,7 @@ async def run_agent(
         new_messages.append({**msg, "tool_calls": [dict(tc) for tc in msg["tool_calls"]]})
 
         for c in calls:
-            result = registry.run(c.name, c.arguments)
+            result = await registry.run(c.name, c.arguments)
             tool_msg = {"role": "tool", "content": result, "tool_call_id": c.id, "name": c.name}
             messages.append(tool_msg)
             new_messages.append(dict(tool_msg))

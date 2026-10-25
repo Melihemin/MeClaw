@@ -8,10 +8,8 @@ from meclaw.agent import SYSTEM_PROMPT
 from meclaw.config import Settings
 from meclaw.llm.base import ChatEvent
 from meclaw.storage import Storage
-from meclaw.tools.registry import ToolRegistry
 from server import create_app
-from tests.fakes import FakeProvider
-from tools.finder.explorer_class import Explorer
+from tests.fakes import FakeProvider, make_registry
 
 KEY = "sk-test-abcdefgh12345678"
 BASE = Settings(
@@ -57,17 +55,17 @@ def built():
 
 @pytest.fixture
 def client(tmp_path, h, built):
-    def make_registry(path):
-        built.append(path)
-        return ToolRegistry(Explorer(base_dir=str(path)))
+    def build(settings):
+        built.append(settings.workspace_dir)
+        return make_registry(settings.workspace_dir)
 
     app = create_app(
         {"fake": h.provider},
-        ToolRegistry(Explorer(base_dir=str(tmp_path / "ws"))),
+        make_registry(tmp_path / "ws"),
         Storage(tmp_path / "t.db"),
         settings=BASE,
         apply_settings=h.apply,
-        make_registry=make_registry,
+        make_registry=build,
     )
     return TestClient(app, base_url="http://127.0.0.1")
 
@@ -145,7 +143,7 @@ def test_custom_system_prompt_reaches_model(client, h):
 
 
 def test_settings_unavailable_without_apply(tmp_path):
-    app = create_app({"fake": FakeProvider()}, ToolRegistry(Explorer(base_dir=str(tmp_path / "ws"))), Storage(tmp_path / "t.db"))
+    app = create_app({"fake": FakeProvider()}, make_registry(tmp_path / "ws"), Storage(tmp_path / "t.db"))
     c = TestClient(app, base_url="http://127.0.0.1")
     assert c.get("/api/settings").status_code == 404
     assert c.put("/api/settings", json={}).status_code == 404

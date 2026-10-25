@@ -6,7 +6,7 @@ import pytest
 
 from meclaw.llm.ollama import OllamaProvider, to_ollama_messages
 
-TOOLS = [{"type": "function", "function": {"name": "create_file_tool", "parameters": {}}}]
+TOOLS = [{"type": "function", "function": {"name": "create_file", "parameters": {}}}]
 
 
 def chunk(content="", tool_calls=None, thinking=None):
@@ -65,15 +65,15 @@ def test_to_ollama_messages():
         {"role": "system", "content": "s"},
         {"role": "user", "content": "u"},
         {"role": "assistant", "content": "a"},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "name": "read_file_tool", "arguments": {"filename": "a"}}]},
-        {"role": "tool", "content": "hi", "tool_call_id": "c1", "name": "read_file_tool"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "name": "read_file", "arguments": {"filename": "a"}}]},
+        {"role": "tool", "content": "hi", "tool_call_id": "c1", "name": "read_file"},
     ]
     assert to_ollama_messages(msgs) == [
         {"role": "system", "content": "s"},
         {"role": "user", "content": "u"},
         {"role": "assistant", "content": "a"},
-        {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "read_file_tool", "arguments": {"filename": "a"}}}]},
-        {"role": "tool", "content": "hi", "tool_name": "read_file_tool"},
+        {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "read_file", "arguments": {"filename": "a"}}}]},
+        {"role": "tool", "content": "hi", "tool_name": "read_file"},
     ]
 
 
@@ -81,14 +81,14 @@ def test_stream_text_and_tool_calls():
     fake = FakeClient(chunks=[
         chunk("Mer", thinking="hmm"),
         chunk("haba"),
-        chunk("", tool_calls=[tool_call("create_file_tool", {"filename": "a"})]),
+        chunk("", tool_calls=[tool_call("create_file", {"filename": "a"})]),
     ])
     events = collect(make(fake).chat("qwen3:8b", [{"role": "user", "content": "x"}], TOOLS))
     assert [e.text for e in events if e.type == "text"] == ["Mer", "haba"]
     tcs = [e for e in events if e.type == "tool_calls"]
     assert len(tcs) == 1 and events[-1] is tcs[0]
     tc = tcs[0].tool_calls[0]
-    assert tc.name == "create_file_tool" and tc.arguments == {"filename": "a"} and tc.id
+    assert tc.name == "create_file" and tc.arguments == {"filename": "a"} and tc.id
     assert fake.chat_calls[0]["stream"] is True
     assert fake.chat_calls[0]["model"] == "qwen3:8b"
 

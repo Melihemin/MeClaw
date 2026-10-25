@@ -44,3 +44,11 @@ class FakeProvider:
             yield event
         if self._index == len(self.turns) and self.error:
             raise self.error
+
+
+def make_registry(path, **ctx_kwargs):
+    from meclaw.tools import build_registry
+    from meclaw.tools.base import ToolContext
+    from tools.finder.explorer_class import Explorer
+
+    return build_registry(ToolContext(Explorer(path), **ctx_kwargs))

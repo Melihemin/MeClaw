@@ -19,8 +19,8 @@ def test_messages_roundtrip(store):
     c = store.create_conversation()
     msgs = [
         {"role": "user", "content": "x"},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "name": "list_items_tool", "arguments": {}}]},
-        {"role": "tool", "content": "ok", "tool_call_id": "c1", "name": "list_items_tool"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "name": "list_items", "arguments": {}}]},
+        {"role": "tool", "content": "ok", "tool_call_id": "c1", "name": "list_items"},
         {"role": "assistant", "content": "bitti"},
     ]
     store.add_messages(c["id"], msgs)

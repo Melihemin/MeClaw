@@ -4,9 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from meclaw.storage import Storage
-from meclaw.tools.registry import ToolRegistry
 from server import create_app
-from tests.fakes import FakeProvider
+from tests.fakes import FakeProvider, make_registry
 from tools.finder.explorer_class import Explorer
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -36,7 +35,7 @@ def opened():
 def client(tmp_path, ws, opened):
     app = create_app(
         {"fake": FakeProvider()},
-        ToolRegistry(Explorer(base_dir=str(ws))),
+        make_registry(ws),
         Storage(tmp_path / "t.db"),
         open_folder=opened.append,
     )

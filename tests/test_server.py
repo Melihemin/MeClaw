@@ -5,10 +5,8 @@ from fastapi.testclient import TestClient
 
 from meclaw.llm.base import ChatEvent, ToolCall
 from meclaw.storage import Storage
-from meclaw.tools.registry import ToolRegistry
 from server import create_app
-from tests.fakes import FakeProvider
-from tools.finder.explorer_class import Explorer
+from tests.fakes import FakeProvider, make_registry
 
 
 def parse_sse(text: str) -> list[tuple[str, dict]]:
@@ -37,7 +35,7 @@ def store(tmp_path):
 
 @pytest.fixture
 def registry(tmp_path):
-    return ToolRegistry(Explorer(base_dir=str(tmp_path / "ws")))
+    return make_registry(tmp_path / "ws")
 
 
 @pytest.fixture
@@ -97,13 +95,13 @@ def test_conversation_crud(client):
 
 def test_chat_streams_and_saves(registry, store, tmp_path):
     p = FakeProvider(turns=[
-        [ChatEvent("tool_calls", tool_calls=[ToolCall("1", "create_file_tool", {"filename": "a.txt"})])],
+        [ChatEvent("tool_calls", tool_calls=[ToolCall("1", "create_file", {"filename": "a.txt"})])],
         [ChatEvent("text", "Tamam")],
     ])
     c, cid = make_chat(p, registry, store)
     events = parse_sse(c.post("/api/chat", json=body(cid, "dosya aç")).text)
     assert [e for e, _ in events] == ["tool", "text", "done"]
-    assert events[0][1]["name"] == "create_file_tool"
+    assert events[0][1]["name"] == "create_file"
     assert events[0][1]["arguments"] == {"filename": "a.txt"}
     assert events[1][1] == {"text": "Tamam"}
     assert events[2][1] == {"conversation_id": cid}

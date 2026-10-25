@@ -27,7 +27,8 @@ from meclaw.llm.ollama import OllamaProvider
 from meclaw.llm.openai import OpenAIProvider
 from meclaw.settings_store import save_settings
 from meclaw.storage import Storage
-from meclaw.tools.registry import ToolRegistry
+from meclaw.tools import build_registry
+from meclaw.tools.base import ToolContext, ToolRegistry
 from tools.finder.explorer_class import Explorer
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,7 @@ def create_app(
     allowed_hosts: list[str] | None = None,
     settings: Settings | None = None,
     apply_settings: ApplySettings | None = None,
-    make_registry: Callable[[Path], ToolRegistry] | None = None,
+    make_registry: Callable[[Settings], ToolRegistry] | None = None,
     open_folder: Callable[[Path], None] = open_in_file_manager,
 ) -> FastAPI:
     app = FastAPI()
@@ -228,7 +229,7 @@ def create_app(
             old_workspace = state.settings.workspace_dir
             state.settings, state.providers = apply_settings(changes)
             if make_registry and state.settings.workspace_dir != old_workspace:
-                state.registry = make_registry(state.settings.workspace_dir)
+                state.registry = make_registry(state.settings)
         return settings_payload()
 
     @app.get("/api/files")
@@ -355,8 +356,8 @@ def build_providers(settings: Settings) -> dict[str, Provider]:
     }
 
 
-def build_registry(workspace: Path) -> ToolRegistry:
-    return ToolRegistry(Explorer(workspace))
+def build_registry_for(settings: Settings) -> ToolRegistry:
+    return build_registry(ToolContext(Explorer(settings.workspace_dir)))
 
 
 def apply_env_settings(changes: dict) -> tuple[Settings, dict[str, Provider]]:
@@ -369,11 +370,11 @@ def build_default_app() -> FastAPI:
     settings = load_settings()
     return create_app(
         build_providers(settings),
-        build_registry(settings.workspace_dir),
+        build_registry_for(settings),
         Storage(settings.db_path),
         settings=settings,
         apply_settings=apply_env_settings,
-        make_registry=build_registry,
+        make_registry=build_registry_for,
     )
 
 

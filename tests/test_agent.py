@@ -4,14 +4,12 @@ import pytest
 
 from meclaw.agent import run_agent
 from meclaw.llm.base import ChatEvent, ToolCall
-from meclaw.tools.registry import ToolRegistry
-from tests.fakes import FakeProvider
-from tools.finder.explorer_class import Explorer
+from tests.fakes import FakeProvider, make_registry
 
 
 @pytest.fixture
 def registry(tmp_path):
-    return ToolRegistry(Explorer(base_dir=str(tmp_path)))
+    return make_registry(tmp_path)
 
 
 def collect(agen):
@@ -31,19 +29,19 @@ def test_plain_text_reply(registry):
 
 
 def test_tool_result_goes_back_to_model(registry, tmp_path):
-    call = ToolCall("c1", "create_file_tool", {"filename": "n.txt"})
+    call = ToolCall("c1", "create_file", {"filename": "n.txt"})
     p = FakeProvider(turns=[[ChatEvent("tool_calls", tool_calls=[call])], [ChatEvent("text", "Oluşturdum.")]])
     new = []
     events = collect(run_agent(p, "m", [{"role": "user", "content": "x"}], registry, new))
     assert events[0].type == "tool" and events[0].result == "File 'n.txt' created successfully."
     assert events[-1].text == "Oluşturdum."
-    assert p.calls[1][-1] == {"role": "tool", "content": "File 'n.txt' created successfully.", "tool_call_id": "c1", "name": "create_file_tool"}
+    assert p.calls[1][-1] == {"role": "tool", "content": "File 'n.txt' created successfully.", "tool_call_id": "c1", "name": "create_file"}
     assert [m["role"] for m in new] == ["assistant", "tool", "assistant"]
-    assert new[0]["tool_calls"] == [{"id": "c1", "name": "create_file_tool", "arguments": {"filename": "n.txt"}}]
+    assert new[0]["tool_calls"] == [{"id": "c1", "name": "create_file", "arguments": {"filename": "n.txt"}}]
 
 
 def test_turn_limit(registry):
-    call = ToolCall("c", "list_items_tool", {})
+    call = ToolCall("c", "list_items", {})
     p = FakeProvider(turns=[[ChatEvent("tool_calls", tool_calls=[call])]] * 6)
     events = collect(run_agent(p, "m", [{"role": "user", "content": "x"}], registry, []))
     assert len(p.calls) == 5 and events[-1].type == "text" and events[-1].text
@@ -58,7 +56,7 @@ def test_partial_text_saved_on_error(registry):
 
 
 def test_multiple_tool_calls_in_one_turn(registry):
-    calls = [ToolCall("a", "create_file_tool", {"filename": "1.txt"}), ToolCall("b", "create_file_tool", {"filename": "2.txt"})]
+    calls = [ToolCall("a", "create_file", {"filename": "1.txt"}), ToolCall("b", "create_file", {"filename": "2.txt"})]
     p = FakeProvider(turns=[[ChatEvent("tool_calls", tool_calls=calls)], [ChatEvent("text", "ok")]])
     new = []
     collect(run_agent(p, "m", [{"role": "user", "content": "x"}], registry, new))

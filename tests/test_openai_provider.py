@@ -11,7 +11,7 @@ from meclaw.llm.openai import (
     to_openai_messages,
 )
 
-TOOLS = [{"type": "function", "function": {"name": "create_file_tool", "parameters": {}}}]
+TOOLS = [{"type": "function", "function": {"name": "create_file", "parameters": {}}}]
 NO_KEY = "OPENAI_API_KEY tanımlı değil"
 
 
@@ -60,15 +60,15 @@ def test_to_openai_messages():
         {"role": "system", "content": "s"},
         {"role": "user", "content": "u"},
         {"role": "assistant", "content": "a"},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "name": "read_file_tool", "arguments": {"filename": "ç.txt"}}]},
-        {"role": "tool", "content": "hi", "tool_call_id": "c1", "name": "read_file_tool"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "name": "read_file", "arguments": {"filename": "ç.txt"}}]},
+        {"role": "tool", "content": "hi", "tool_call_id": "c1", "name": "read_file"},
     ]
     out = to_openai_messages(msgs)
     assert out[0] == {"role": "system", "content": "s"}
     assert out[1] == {"role": "user", "content": "u"}
     assert out[2] == {"role": "assistant", "content": "a"}
     assert out[3]["content"] == ""
-    assert out[3]["tool_calls"] == [{"id": "c1", "type": "function", "function": {"name": "read_file_tool", "arguments": '{"filename": "ç.txt"}'}}]
+    assert out[3]["tool_calls"] == [{"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": '{"filename": "ç.txt"}'}}]
     assert out[4] == {"role": "tool", "content": "hi", "tool_call_id": "c1"}
 
 
@@ -79,9 +79,9 @@ def test_filter_chat_models():
 
 def test_accumulator_merges_fragments():
     acc = ToolCallAccumulator()
-    acc.add([delta(index=0, id="c1", name="create_file_tool", arguments='{"file')])
+    acc.add([delta(index=0, id="c1", name="create_file", arguments='{"file')])
     acc.add([delta(index=0, arguments='name": "a.txt"}')])
-    assert acc.result() == [ToolCall("c1", "create_file_tool", {"filename": "a.txt"})]
+    assert acc.result() == [ToolCall("c1", "create_file", {"filename": "a.txt"})]
 
 
 def test_accumulator_parallel_calls_ordered_by_index():
@@ -126,7 +126,7 @@ def test_stream_text_then_tool_calls():
         SimpleNamespace(choices=[]),
         chunk("Mer"),
         chunk("haba"),
-        chunk(None, [delta(0, "c1", "create_file_tool", '{"filename"')]),
+        chunk(None, [delta(0, "c1", "create_file", '{"filename"')]),
         chunk(None, [delta(0, None, None, ': "a"}')]),
         chunk(None),
     ])
@@ -134,7 +134,7 @@ def test_stream_text_then_tool_calls():
     assert [e.text for e in events if e.type == "text"] == ["Mer", "haba"]
     tcs = [e for e in events if e.type == "tool_calls"]
     assert len(tcs) == 1 and events[-1] is tcs[0]
-    assert tcs[0].tool_calls == [ToolCall("c1", "create_file_tool", {"filename": "a"})]
+    assert tcs[0].tool_calls == [ToolCall("c1", "create_file", {"filename": "a"})]
     call = fake.calls[0]
     assert call["stream"] is True and call["model"] == "gpt-4o" and call["tools"] == TOOLS
 
