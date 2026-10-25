@@ -203,7 +203,7 @@ async function loadProviders() {
   const first = providers.find((p) => p.ready);
   const pick = usable(stored) ? stored : first ? first.name : providers.length ? providers[0].name : "";
   if (pick) els.provider.value = pick;
-  await loadModels(storeGet("meclaw.model"));
+  await loadModels(pick === stored ? storeGet("meclaw.model") : null);
 }
 
 function setNote(text) {
@@ -226,14 +226,13 @@ async function loadModels(preferModel) {
     return;
   }
   if (token !== state.modelsToken) return;
-  if (preferModel && !models.includes(preferModel)) models = [preferModel, ...models];
   for (const m of models) {
     const opt = document.createElement("option");
     opt.value = m;
     opt.textContent = m;
     els.model.appendChild(opt);
   }
-  if (preferModel) els.model.value = preferModel;
+  if (preferModel && models.includes(preferModel)) els.model.value = preferModel;
   else if (models.length) els.model.value = models[0];
 }
 
@@ -294,13 +293,14 @@ async function openConversation(id) {
       els.provider.value = conv.provider;
       await loadModels(conv.model || null);
     }
-  } else if (conv.model) {
+  } else if (conv.model && Array.from(els.model.options).some((o) => o.value === conv.model)) {
     els.model.value = conv.model;
   }
   refreshConversations();
 }
 
 async function deleteConversation(c) {
+  if (state.busy) return;
   if (!confirm("“" + c.title + "” sohbeti silinsin mi?")) return;
   try { await api("/api/conversations/" + encodeURIComponent(c.id), { method: "DELETE" }); }
   catch (e) { addErrorLine(e.message); return; }
