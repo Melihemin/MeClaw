@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from meclaw import files
-from meclaw.agent import SYSTEM_PROMPT, ConfirmRequest, run_agent
+from meclaw.agent import SYSTEM_PROMPT, ConfirmRequest, close_open_tool_calls, run_agent
 from meclaw.config import DEFAULT_WORKSPACE, Settings, load_settings
 from meclaw.llm.base import Provider
 from meclaw.llm.ollama import OllamaProvider
@@ -323,20 +323,23 @@ def create_app(
         storage.update_conversation(
             req.conversation_id, title=title, provider=req.provider, model=req.model
         )
-        history = storage.get_conversation(req.conversation_id)["messages"]
+        # Heals conversations saved with unanswered tool calls by older builds.
+        history = close_open_tool_calls(storage.get_conversation(req.conversation_id)["messages"])
         system_prompt = (state.settings and state.settings.system_prompt) or SYSTEM_PROMPT
         tools = state.registry
         new_messages: list[dict] = []
-        my_pending: set[str] = set()
+        # This stream's own futures. ask() looks here, not in state.pending, because a
+        # decision POST pops state.pending before ask() may have started waiting.
+        my_pending: dict[str, asyncio.Future] = {}
 
         def register(confirm_id: str) -> asyncio.Future:
-            entry = state.pending.get(confirm_id)
-            if entry is None:
+            fut = my_pending.get(confirm_id)
+            if fut is None:
                 loop = asyncio.get_running_loop()
-                entry = (loop, loop.create_future())
-                state.pending[confirm_id] = entry
-                my_pending.add(confirm_id)
-            return entry[1]
+                fut = loop.create_future()
+                my_pending[confirm_id] = fut
+                state.pending[confirm_id] = (loop, fut)
+            return fut
 
         async def ask(confirm_req: ConfirmRequest) -> bool:
             fut = register(confirm_req.id)
@@ -346,7 +349,7 @@ def create_app(
                 return False
             finally:
                 state.pending.pop(confirm_req.id, None)
-                my_pending.discard(confirm_req.id)
+                my_pending.pop(confirm_req.id, None)
 
         async def gen():
             try:
@@ -383,16 +386,15 @@ def create_app(
                     yield sse("error", {"message": message})
             finally:
                 # A closed stream can no longer show a decision: drop its waiting futures.
-                for confirm_id in list(my_pending):
-                    entry = state.pending.pop(confirm_id, None)
-                    if entry is not None:
-                        entry[1].cancel()
+                for confirm_id, fut in list(my_pending.items()):
+                    state.pending.pop(confirm_id, None)
+                    fut.cancel()
                 my_pending.clear()
                 # Runs on normal end and on client disconnect (GeneratorExit/CancelledError);
                 # run_agent records partial text on those too, so it is saved here.
                 if new_messages:
                     try:
-                        storage.add_messages(req.conversation_id, new_messages)
+                        storage.add_messages(req.conversation_id, close_open_tool_calls(new_messages))
                     except Exception:
                         logger.exception("Saving messages failed")
             yield sse("done", {"conversation_id": req.conversation_id})
@@ -402,7 +404,8 @@ def create_app(
     @app.post("/api/chat/confirm", status_code=204)
     def confirm_tool(request: Request, decision: ConfirmDecision):
         require_local(request)
-        entry = state.pending.get(decision.confirm_id)
+        # pop() claims the entry atomically, so a repeated decision gets 404.
+        entry = state.pending.pop(decision.confirm_id, None)
         if entry is None or entry[1].done():
             raise HTTPException(404, detail="Confirmation not found")
         loop, fut = entry

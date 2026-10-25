@@ -157,3 +157,16 @@ def test_models_error_redacts_api_key(registry, store):
     p = FakeProvider(models_error=RuntimeError("Incorrect API key provided: sk-abc…wxyz"))
     r = make_client(create_app({"fake": p}, registry, store)).get("/api/models", params={"provider": "fake"})
     assert r.status_code == 503 and "wxyz" not in r.json()["detail"] and "sk-***" in r.json()["detail"]
+
+
+def test_chat_heals_unanswered_tool_calls(registry, store):
+    p = FakeProvider(turns=[[ChatEvent("text", "ok")]])
+    c, cid = make_chat(p, registry, store)
+    store.add_messages(cid, [
+        {"role": "user", "content": "sil"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "name": "delete_file", "arguments": {}}]},
+    ])
+    c.post("/api/chat", json=body(cid, "devam"))
+    sent = p.calls[0]
+    assert [m["role"] for m in sent] == ["system", "user", "assistant", "tool", "user"]
+    assert sent[3]["tool_call_id"] == "c1" and sent[3]["content"].startswith("Cancelled:")

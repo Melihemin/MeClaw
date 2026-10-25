@@ -24,6 +24,7 @@ SYSTEM_PROMPT = (
 MAX_TURNS = 5
 LIMIT_MESSAGE = "Araç kullanım sınırına ulaşıldı; model son bir yanıt üretemedi."
 DENIED_PREFIX = "Denied by the user: "
+CANCELLED_RESULT = "Cancelled: no decision was made (stream closed)."
 
 
 @dataclass
@@ -49,6 +50,38 @@ class AgentEvent:
     description: str = ""
     preview: str = ""
     approved: bool = False
+
+
+def close_open_tool_calls(messages: list[dict]) -> list[dict]:
+    """Return a copy where every assistant tool call has a matching tool message.
+
+    A stream closed mid-turn (disconnect, server stop, pending confirmation) can leave
+    tool calls unanswered; providers such as OpenAI reject such histories. Missing
+    results are inserted, in call order, right after the tool messages that follow
+    each assistant message. Complete histories come back unchanged.
+    """
+    result: list[dict] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        result.append(msg)
+        i += 1
+        if msg.get("role") != "assistant" or not msg.get("tool_calls"):
+            continue
+        answered: set = set()
+        while i < len(messages) and messages[i].get("role") == "tool":
+            answered.add(messages[i].get("tool_call_id"))
+            result.append(messages[i])
+            i += 1
+        for call in msg["tool_calls"]:
+            if call.get("id") not in answered:
+                result.append({
+                    "role": "tool",
+                    "tool_call_id": call.get("id"),
+                    "name": call.get("name"),
+                    "content": CANCELLED_RESULT,
+                })
+    return result
 
 
 async def _ask(confirm: ConfirmHook | None, req: ConfirmRequest) -> bool:

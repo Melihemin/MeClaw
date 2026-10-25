@@ -88,6 +88,7 @@ def start_chat(client):
             done.put(exc)
 
     threading.Thread(target=reader, daemon=True).start()
+    done.cid = cid
     return done
 
 
@@ -152,6 +153,8 @@ def test_confirm_after_resolution_404(setup):
     done = start_chat(client)
     req = next_event(tap, "confirm")
     assert confirm(client, req["id"], True).status_code == 204
+    # Claimed atomically: an immediate second decision for the same id is refused.
+    assert confirm(client, req["id"], False).status_code == 404
     all_events(tap, done)
     assert confirm(client, req["id"], True).status_code == 404
     assert confirm(client, "nope", True).status_code == 404
@@ -176,3 +179,8 @@ def test_pending_cleared_on_disconnect(setup, ws):
     done.get(timeout=WAIT)
     assert confirm(client, req["id"], True).status_code == 404
     assert (ws / "a.txt").exists()
+    saved = client.get(f"/api/conversations/{done.cid}").json()["messages"]
+    call_ids = [c["id"] for m in saved for c in m.get("tool_calls") or []]
+    answered = [m["tool_call_id"] for m in saved if m["role"] == "tool"]
+    assert call_ids == ["c1"] and answered == call_ids
+    assert saved[-1]["content"] == "Cancelled: no decision was made (stream closed)."

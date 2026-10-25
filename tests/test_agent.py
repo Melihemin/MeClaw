@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from meclaw.agent import run_agent
+from meclaw.agent import CANCELLED_RESULT, close_open_tool_calls, run_agent
 from meclaw.llm.base import ChatEvent, ToolCall
 from tests.fakes import FakeProvider, make_registry
 
@@ -155,3 +155,40 @@ def test_unconfirmed_tools_skip_hook(registry, tmp_path):
     p = FakeProvider(turns=[[ChatEvent("tool_calls", tool_calls=[call])], [ChatEvent("text", "ok")]])
     events = collect(run_agent(p, "m", [{"role": "user", "content": "x"}], registry, [], confirm=boom))
     assert [e.type for e in events] == ["tool", "text"] and (tmp_path / "x.txt").exists()
+
+
+def calls_msg(*ids):
+    return {"role": "assistant", "content": "", "tool_calls": [{"id": i, "name": "delete_file", "arguments": {}} for i in ids]}
+
+
+def tool_msg(i):
+    return {"role": "tool", "content": "ok", "tool_call_id": i, "name": "delete_file"}
+
+
+def cancelled(i):
+    return {"role": "tool", "tool_call_id": i, "name": "delete_file", "content": CANCELLED_RESULT}
+
+
+def test_close_open_tool_calls_noop_when_complete():
+    msgs = [{"role": "user", "content": "x"}, calls_msg("a", "b"), tool_msg("a"), tool_msg("b"), {"role": "assistant", "content": "ok"}]
+    assert close_open_tool_calls(msgs) == msgs
+    assert close_open_tool_calls([]) == []
+
+
+def test_close_open_tool_calls_fills_only_missing_in_order():
+    msgs = [calls_msg("a", "b", "c"), tool_msg("b")]
+    assert close_open_tool_calls(msgs) == [calls_msg("a", "b", "c"), tool_msg("b"), cancelled("a"), cancelled("c")]
+    assert msgs == [calls_msg("a", "b", "c"), tool_msg("b")]  # input untouched
+
+
+def test_close_open_tool_calls_repairs_every_assistant_message():
+    msgs = [
+        {"role": "user", "content": "1"}, calls_msg("a"),
+        {"role": "user", "content": "2"}, calls_msg("b"), tool_msg("b"),
+        {"role": "user", "content": "3"}, calls_msg("c"),
+    ]
+    assert close_open_tool_calls(msgs) == [
+        {"role": "user", "content": "1"}, calls_msg("a"), cancelled("a"),
+        {"role": "user", "content": "2"}, calls_msg("b"), tool_msg("b"),
+        {"role": "user", "content": "3"}, calls_msg("c"), cancelled("c"),
+    ]
