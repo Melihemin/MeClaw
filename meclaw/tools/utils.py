@@ -10,6 +10,8 @@ from meclaw.tools.base import ToolContext, ToolSpec
 
 MAX_EXPRESSION_CHARS = 200
 MAX_EXPONENT = 1000
+MAX_RESULT_BITS = 10_000
+MAX_ROUND_DIGITS = 400
 
 _WEEKDAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 _MONTHS = [
@@ -51,6 +53,10 @@ def format_datetime(dt: datetime) -> str:
     )
 
 
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -79,7 +85,10 @@ def _eval(node: ast.AST):
         if isinstance(node.op, ast.Pow):
             if not _is_number(right) or abs(right) > MAX_EXPONENT:
                 raise _Unsupported()
-            if abs(left) > 1e6 and right > 100:
+            if _is_int(left) and _is_int(right) and right > 0 and abs(left).bit_length() * right > MAX_RESULT_BITS:
+                raise _Unsupported()
+        elif isinstance(node.op, ast.Mult):
+            if _is_int(left) and _is_int(right) and abs(left).bit_length() + abs(right).bit_length() > MAX_RESULT_BITS:
                 raise _Unsupported()
         return op(left, right)
     if isinstance(node, ast.Call):
@@ -88,6 +97,8 @@ def _eval(node: ast.AST):
         if any(isinstance(a, ast.Starred) for a in node.args):
             raise _Unsupported()
         args = [_eval(a) for a in node.args]
+        if node.func.id == "round" and len(args) == 2 and (not _is_int(args[1]) or abs(args[1]) > MAX_ROUND_DIGITS):
+            raise _Unsupported()
         try:
             return _FUNCTIONS[node.func.id](*args)
         except TypeError:
@@ -133,7 +144,13 @@ def calculate(ctx: ToolContext, expression: str) -> str:
         return "Error: division by zero"
     except (ArithmeticError, ValueError) as exc:
         return f"Error: {exc}"
-    return f"{expression} = {_format_number(value)}"
+    if isinstance(value, float) and not math.isfinite(value):
+        return "Error: result is not finite"
+    try:
+        text = _format_number(value)
+    except ValueError:
+        return "Error: result too large"
+    return f"{expression} = {text}"
 
 
 UTIL_TOOLS: list[ToolSpec] = [

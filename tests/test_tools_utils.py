@@ -39,7 +39,7 @@ def test_calculate_ok(expr, value):
 
 @pytest.mark.parametrize("expr", [
     "__import__('os')", "().__class__", "open('x')", "a", "2**10001", "lambda: 1", "[1, 2]",
-    "1 if 1 else 2", "True", "'a'", "1j", "2**-1001", "10000000**101", "sqrt(x=4)", "math.sqrt(4)",
+    "1 if 1 else 2", "True", "'a'", "1j", "2**-1001", "sqrt(x=4)", "math.sqrt(4)",
     "abs(*[1])", "1 < 2",
 ])
 def test_safe_eval_rejects(expr):
@@ -64,3 +64,25 @@ def test_calculate_tool_output(tmp_path):
     assert run("calculate", expression="1/3") == "1/3 = 0.333333333333"
     assert run("calculate", expression="sqrt(-1)").startswith("Error: ")
     assert run("calculate", expression="5 % 0") == "Error: division by zero"
+
+
+@pytest.mark.parametrize("expr", [
+    "(((((9999999**100)**100)**100)**100)**100",
+    "9999999**100*9999999**100*9999999**100*9999999**100*9999999**100*9999999**100",
+    "(9999999**100*9999999**100)**5",
+    "1000000**1000",
+    "round(1, -10000000)",
+    "round(1, 1.5)",
+])
+def test_resource_guards_fast(tmp_path, expr):
+    import time
+    start = time.perf_counter()
+    assert runner(tmp_path)("calculate", expression=expr) == "Unsupported expression"
+    assert time.perf_counter() - start < 1
+
+
+def test_not_finite_and_large(tmp_path):
+    run = runner(tmp_path)
+    assert run("calculate", expression="1e308*10") == "Error: result is not finite"
+    assert run("calculate", expression="round(1234.5678, -2)") == "round(1234.5678, -2) = 1200"
+    assert run("calculate", expression="9999999**100").startswith("9999999**100 = ")
