@@ -41,6 +41,15 @@ const els = {
   resetPrompt: $("reset-prompt"),
   setWorkspace: $("set-workspace"),
   resetWorkspace: $("reset-workspace"),
+  toolsSection: $("tools-section"),
+  setInternet: $("set-internet"),
+  setMemory: $("set-memory"),
+  memorySection: $("memory-section"),
+  memoryOffNote: $("memory-off-note"),
+  memoryList: $("memory-list"),
+  memoryNew: $("memory-new"),
+  memoryAdd: $("memory-add"),
+  memoryClear: $("memory-clear"),
   openFiles: $("open-files"),
   files: $("files"),
   filesUpload: $("files-upload"),
@@ -68,6 +77,8 @@ const state = {
   settings: null,     // GET /api/settings payload, or null when unavailable
   clearKey: false,
   filesPath: "",      // folder shown in the Files panel, relative to the workspace
+  memories: [],       // [{id, content, created_at, updated_at}]
+  editingMemory: null, // id of the memory row being edited inline
 };
 
 // ---------- storage helpers ----------
@@ -198,18 +209,122 @@ function appendAssistantText(bubble, text) {
   scrollToBottom();
 }
 
+const DENIED_PREFIX = "Denied by the user:";
+
+// One label for a tool call, used for live events and for history alike.
+function toolLabel(name, result) {
+  const n = name || "araç";
+  if (n === "remember") return "📝 Hafıza güncellendi";
+  if (n === "forget") return "📝 Hafızadan silindi";
+  if (typeof result === "string" && result.startsWith(DENIED_PREFIX)) return "🚫 " + n;
+  if (n === "fetch_url" || n === "web_search") return "🌐 " + n;
+  return "🛠 " + n;
+}
+
 function addToolTag(name, result) {
   setEmpty(false);
   const det = document.createElement("details");
   det.className = "tool";
   const sum = document.createElement("summary");
-  sum.textContent = "🛠 " + (name || "araç");
+  sum.textContent = toolLabel(name, result);
   const pre = document.createElement("pre");
   pre.textContent = result == null ? "" : String(result);
   det.appendChild(sum);
   det.appendChild(pre);
   els.messages.appendChild(det);
   scrollToBottom();
+}
+
+// ---------- confirmation cards ----------
+
+const confirmCards = new Map();  // confirm id -> card element (this stream only)
+
+function setConfirmState(card, text, cls) {
+  card._final = true;
+  card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+  const st = card.querySelector(".confirm-state");
+  st.textContent = text;
+  st.className = "confirm-state" + (cls ? " " + cls : "");
+}
+
+async function answerConfirm(card, id, approved) {
+  card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+  const st = card.querySelector(".confirm-state");
+  st.textContent = "Gönderiliyor…";
+  try {
+    await api("/api/chat/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-MeClaw": "1" },
+      body: JSON.stringify({ confirm_id: id, approved }),
+    });
+  } catch (e) {
+    if (card._final) return;  // confirm_result already settled it
+    if (e.status === 404) setConfirmState(card, "⌛ Süresi doldu", "expired");
+    else {
+      st.textContent = "Gönderilemedi: " + e.message;
+      st.className = "confirm-state error";
+      card.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+    }
+  }
+}
+
+function addConfirmCard(data) {
+  setEmpty(false);
+  const card = document.createElement("div");
+  card.className = "confirm-card";
+  card.setAttribute("role", "group");
+  card.setAttribute("aria-label", "Onay gerekiyor");
+  const title = document.createElement("div");
+  title.className = "confirm-title";
+  title.textContent = "🛡 Onay gerekiyor";
+  const desc = document.createElement("div");
+  desc.className = "confirm-desc";
+  desc.textContent = data.description || data.name || "";
+  card.appendChild(title);
+  card.appendChild(desc);
+  if (data.preview) {
+    const pre = document.createElement("pre");
+    pre.textContent = data.preview;
+    card.appendChild(pre);
+  }
+  const actions = document.createElement("div");
+  actions.className = "confirm-actions";
+  const allow = document.createElement("button");
+  allow.type = "button";
+  allow.className = "btn primary";
+  allow.textContent = "İzin ver";
+  const deny = document.createElement("button");
+  deny.type = "button";
+  deny.className = "btn";
+  deny.textContent = "Reddet";
+  const st = document.createElement("span");
+  st.className = "confirm-state";
+  st.setAttribute("role", "status");
+  allow.addEventListener("click", () => answerConfirm(card, data.id, true));
+  deny.addEventListener("click", () => answerConfirm(card, data.id, false));
+  actions.appendChild(allow);
+  actions.appendChild(deny);
+  actions.appendChild(st);
+  card.appendChild(actions);
+  confirmCards.set(data.id, card);
+  els.messages.appendChild(card);
+  scrollToBottom();
+  return card;
+}
+
+function resolveConfirmCard(data) {
+  const card = confirmCards.get(data.id);
+  if (!card) return;
+  if (data.approved) setConfirmState(card, "✓ İzin verildi", "ok");
+  else setConfirmState(card, "✗ Reddedildi", "denied");
+}
+
+// When the stream ends, a card that never got an answer can no longer be answered.
+function expireOpenConfirmCards() {
+  for (const card of confirmCards.values()) {
+    if (!card._final) setConfirmState(card, "⌛ Süresi doldu", "expired");
+  }
+  confirmCards.clear();
 }
 
 function addErrorLine(message) {
@@ -564,6 +679,11 @@ async function sendMessage() {
       if (ev.name === "text") {
         if (!bubble) { bubble = addAssistantBubble(""); bubble.classList.add("typing"); }
         appendAssistantText(bubble, ev.data.text || "");
+      } else if (ev.name === "confirm") {
+        settle();
+        addConfirmCard(ev.data);
+      } else if (ev.name === "confirm_result") {
+        resolveConfirmCard(ev.data);
       } else if (ev.name === "tool") {
         settle();
         addToolTag(ev.data.name, ev.data.result);
@@ -594,6 +714,7 @@ async function sendMessage() {
   } catch (e) {
     addErrorLine(e.message);
   } finally {
+    expireOpenConfirmCards();
     if (bubble) {
       bubble.classList.remove("typing");
       if (!bubble._raw) bubble.remove();
@@ -646,8 +767,10 @@ function fillSettingsForm() {
   els.setKey.value = "";
   state.clearKey = false;
   const serverFields = [els.setOllama, els.setKey, els.setDefaultProvider, els.setDefaultModel, els.setPrompt,
-    els.clearKey, els.resetPrompt, els.setWorkspace, els.resetWorkspace];
+    els.clearKey, els.resetPrompt, els.setWorkspace, els.resetWorkspace, els.setInternet, els.setMemory];
   serverFields.forEach((el) => { el.disabled = !s; });
+  els.toolsSection.hidden = !s;
+  els.memorySection.hidden = !s;
   if (!s) {
     setSettingsStatus("Sunucu ayarları bu ortamda düzenlenemiyor.", true);
     return;
@@ -673,7 +796,148 @@ function fillSettingsForm() {
   els.setPrompt.value = s.system_prompt || s.system_prompt_default || "";
   els.setWorkspace.value = s.workspace || "";
   els.setWorkspace.placeholder = s.workspace_default || "";
+  els.setInternet.checked = Boolean(s.internet_enabled);
+  els.setMemory.checked = Boolean(s.memory_enabled);
+  renderMemories();
 }
+
+// ---------- memory (settings) ----------
+
+function renderMemories() {
+  const list = els.memoryList;
+  list.textContent = "";
+  els.memoryOffNote.hidden = els.setMemory.checked;
+  els.memoryClear.hidden = !state.memories.length;
+  if (!state.memories.length) {
+    const li = document.createElement("li");
+    li.className = "memory-empty muted";
+    li.textContent = "Henüz not yok.";
+    list.appendChild(li);
+    return;
+  }
+  for (const m of state.memories) {
+    const li = document.createElement("li");
+    li.className = "memory-item";
+    if (state.editingMemory === m.id) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.maxLength = 500;
+      input.value = m.content;
+      input.setAttribute("aria-label", "Notu düzenle");
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "btn";
+      save.textContent = "Kaydet";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "btn";
+      cancel.textContent = "İptal";
+      save.addEventListener("click", () => saveMemory(m.id, input.value));
+      cancel.addEventListener("click", () => { state.editingMemory = null; renderMemories(); });
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); saveMemory(m.id, input.value); }
+        else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); state.editingMemory = null; renderMemories(); }
+      });
+      li.appendChild(input);
+      li.appendChild(save);
+      li.appendChild(cancel);
+      setTimeout(() => input.focus(), 0);
+    } else {
+      const text = document.createElement("span");
+      text.className = "memory-text";
+      text.textContent = m.content;
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "icon-btn";
+      edit.textContent = "✎";
+      edit.title = "Düzenle";
+      edit.setAttribute("aria-label", "Notu düzenle");
+      edit.addEventListener("click", () => { state.editingMemory = m.id; renderMemories(); });
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "icon-btn";
+      del.textContent = "🗑";
+      del.title = "Sil";
+      del.setAttribute("aria-label", "Notu sil");
+      del.addEventListener("click", () => deleteMemory(m.id));
+      li.appendChild(text);
+      li.appendChild(edit);
+      li.appendChild(del);
+    }
+    list.appendChild(li);
+  }
+}
+
+async function loadMemories() {
+  try { state.memories = await api("/api/memories"); }
+  catch (e) { state.memories = []; setSettingsStatus("Hafıza yüklenemedi: " + e.message, true); }
+  state.editingMemory = null;
+  renderMemories();
+}
+
+const MEMORY_WRITE = { "Content-Type": "application/json", "X-MeClaw": "1" };
+
+async function addMemory() {
+  const content = els.memoryNew.value.trim();
+  if (!content) return;
+  els.memoryAdd.disabled = true;
+  try {
+    const m = await api("/api/memories", { method: "POST", headers: MEMORY_WRITE, body: JSON.stringify({ content }) });
+    state.memories.push(m);
+    els.memoryNew.value = "";
+    setSettingsStatus("");
+    renderMemories();
+  } catch (e) { setSettingsStatus(e.message, true); }
+  finally { els.memoryAdd.disabled = false; }
+}
+
+async function saveMemory(id, value) {
+  const content = value.trim();
+  if (!content) { setSettingsStatus("Not boş olamaz.", true); return; }
+  try {
+    const m = await api("/api/memories/" + encodeURIComponent(id), {
+      method: "PUT", headers: MEMORY_WRITE, body: JSON.stringify({ content }),
+    });
+    state.memories = state.memories.map((x) => (x.id === id ? m : x));
+    state.editingMemory = null;
+    setSettingsStatus("");
+    renderMemories();
+  } catch (e) {
+    setSettingsStatus(e.message, true);
+    if (e.status === 404) await loadMemories();
+  }
+}
+
+async function deleteMemory(id) {
+  try {
+    await api("/api/memories/" + encodeURIComponent(id), { method: "DELETE", headers: { "X-MeClaw": "1" } });
+    state.memories = state.memories.filter((x) => x.id !== id);
+    setSettingsStatus("");
+    renderMemories();
+  } catch (e) {
+    setSettingsStatus(e.message, true);
+    if (e.status === 404) await loadMemories();
+  }
+}
+
+async function clearMemories() {
+  if (!state.memories.length) return;
+  if (!confirm("Tüm hafıza notları silinsin mi?")) return;
+  try {
+    await api("/api/memories", { method: "DELETE", headers: { "X-MeClaw": "1" } });
+    state.memories = [];
+    setSettingsStatus("");
+    renderMemories();
+  } catch (e) { setSettingsStatus(e.message, true); }
+}
+
+els.memoryAdd.addEventListener("click", addMemory);
+els.memoryClear.addEventListener("click", clearMemories);
+els.memoryNew.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") { ev.preventDefault(); addMemory(); }
+});
+// The checkbox is saved with Kaydet; here it only toggles the "memory off" note.
+els.setMemory.addEventListener("change", () => { els.memoryOffNote.hidden = els.setMemory.checked; });
 
 function fillKnownModels() {
   els.knownModels.textContent = "";
@@ -694,8 +958,11 @@ async function openSettings() {
   try { state.settings = await api("/api/settings"); }
   catch (e) { state.settings = null; }
   fillSettingsForm();
+  state.memories = [];
+  state.editingMemory = null;
   if (typeof els.dialog.showModal === "function") els.dialog.showModal();
   else els.dialog.setAttribute("open", "");
+  if (state.settings) loadMemories();
 }
 
 function closeSettings() {
@@ -737,6 +1004,8 @@ els.settingsForm.addEventListener("submit", async (ev) => {
     default_provider: els.setDefaultProvider.value,
     default_model: els.setDefaultModel.value,
     system_prompt: els.setPrompt.value,
+    internet_enabled: els.setInternet.checked,
+    memory_enabled: els.setMemory.checked,
     clear_openai_api_key: state.clearKey,
   };
   const workspaceBefore = state.settings.workspace;

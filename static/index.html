@@ -193,6 +193,32 @@
             <button id="reset-prompt" class="link-btn" type="button">Varsayılana dön</button>
           </div>
         </section>
+
+        <section id="tools-section">
+          <h3>Araçlar</h3>
+          <label class="check-row">
+            <input id="set-internet" type="checkbox">
+            <span>İnternet erişimi (web arama ve sayfa okuma)</span>
+          </label>
+          <label class="check-row">
+            <input id="set-memory" type="checkbox">
+            <span>Hafıza (asistan sizinle ilgili notlar tutar)</span>
+          </label>
+        </section>
+
+        <section id="memory-section">
+          <h3>Hafıza</h3>
+          <p id="memory-off-note" class="muted small" hidden>Hafıza kapalı; asistan bu notları kullanmıyor.</p>
+          <ul id="memory-list" class="memory-list"></ul>
+          <div class="memory-add">
+            <input id="memory-new" type="text" maxlength="500" placeholder="Not ekle" aria-label="Not ekle" autocomplete="off">
+            <button id="memory-add" class="btn" type="button">Ekle</button>
+          </div>
+          <div class="key-row">
+            <span class="muted small">Notlar anında kaydedilir.</span>
+            <button id="memory-clear" class="link-btn danger" type="button">Tümünü sil</button>
+          </div>
+        </section>
       </div>
 
       <footer class="settings-foot">

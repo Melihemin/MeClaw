@@ -792,3 +792,59 @@ label.icon-btn { cursor: pointer; }
   .hero { font-size: 22px; }
   .two { grid-template-columns: 1fr; }
 }
+
+/* ---------- confirmation card ---------- */
+
+.confirm-card {
+  align-self: stretch;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 14px;
+}
+.confirm-title { font-weight: 600; margin-bottom: 4px; }
+.confirm-desc { overflow-wrap: anywhere; }
+.confirm-card pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 10px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.confirm-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.confirm-state { font-size: 13px; color: var(--muted); }
+.confirm-state.ok { color: var(--text); font-weight: 600; }
+.confirm-state.denied, .confirm-state.error { color: var(--danger); }
+
+/* ---------- settings: tools and memory ---------- */
+
+.settings .check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.settings .check-row input { width: auto; flex: none; }
+
+.memory-list { list-style: none; margin: 0 0 10px; padding: 0; }
+.memory-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.memory-item:last-child { border-bottom: 0; }
+.memory-text { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.memory-empty { padding: 4px 0; font-size: 13px; }
+.memory-add { display: flex; gap: 8px; margin-bottom: 10px; }
+.memory-add input { flex: 1; min-width: 0; }
+.memory-item .btn { padding: 6px 12px; }
