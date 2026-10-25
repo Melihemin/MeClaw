@@ -12,7 +12,7 @@ const els = {
   send: document.getElementById("send"),
 };
 
-const state = { conversationId: null, busy: false, modelsToken: 0 };
+const state = { conversationId: null, busy: false, modelsToken: 0, unavailable: [] };
 
 // ---------- storage helpers ----------
 
@@ -47,18 +47,22 @@ function renderBlockText(escaped) {
   const lines = escaped.split("\n");
   const out = [];
   let list = null;
+  let listTag = "ul";
   let para = [];
   const flushPara = () => {
     if (para.length) { out.push(para.join("<br>")); para = []; }
   };
   const flushList = () => {
-    if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; }
+    if (list) { out.push("<" + listTag + ">" + list.join("") + "</" + listTag + ">"); list = null; }
   };
   for (const line of lines) {
-    const m = /^\s*- (.*)$/.exec(line);
+    const m = /^\s*(?:([-*])|(\d+\.)) (.*)$/.exec(line);
     if (m) {
       flushPara();
-      (list = list || []).push("<li>" + renderInline(m[1]) + "</li>");
+      const tag = m[1] ? "ul" : "ol";
+      if (list && listTag !== tag) flushList();
+      listTag = tag;
+      (list = list || []).push("<li>" + renderInline(m[3]) + "</li>");
     } else {
       flushList();
       para.push(renderInline(line));
@@ -190,6 +194,9 @@ async function loadProviders() {
     addErrorLine("Sağlayıcılar yüklenemedi: " + e.message);
   }
   els.provider.textContent = "";
+  state.unavailable = providers
+    .filter((p) => !p.ready && p.reason)
+    .map((p) => p.name + ": " + p.reason);
   for (const p of providers) {
     const opt = document.createElement("option");
     opt.value = p.name;
@@ -207,8 +214,10 @@ async function loadProviders() {
 }
 
 function setNote(text) {
-  els.note.textContent = text || "";
-  els.note.hidden = !text;
+  // Reasons for unavailable providers are not visible on disabled <option>s, so show them here.
+  const full = [text].concat(state.unavailable).filter(Boolean).join(" · ");
+  els.note.textContent = full;
+  els.note.hidden = !full;
 }
 
 async function loadModels(preferModel) {
@@ -234,6 +243,7 @@ async function loadModels(preferModel) {
   }
   if (preferModel && models.includes(preferModel)) els.model.value = preferModel;
   else if (models.length) els.model.value = models[0];
+  setNote("");
 }
 
 els.provider.addEventListener("change", async () => {
