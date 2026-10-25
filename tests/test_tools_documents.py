@@ -137,3 +137,33 @@ def test_read_large_csv_streams_rows(tmp_path):
     table = [l for l in out.splitlines() if l.startswith("| ")]
     assert len(table) == 200
     assert "| r198 | 198 |" in out and "r300" not in out
+
+
+def test_csv_cp1254_fallback(tmp_path):
+    (tmp_path / "t.csv").write_bytes("ad;şehir\nİlhan;Ağrı\n".encode("cp1254"))
+    out = asyncio.run(make_registry(tmp_path).run("read_spreadsheet", {"filename": "t.csv"}))
+    assert "şehir" in out and "İlhan" in out and "Ağrı" in out
+
+
+def test_write_spreadsheet_formula_cells_are_text(tmp_path):
+    reg = make_registry(tmp_path)
+    rows = [["=1+1", "+x", "-y", "@z", "ok", 5, -3]]
+    asyncio.run(reg.run("write_spreadsheet", {"filename": "f.csv", "rows": rows}))
+    text = (tmp_path / "f.csv").read_text(encoding="utf-8-sig")
+    assert text.strip() == "'=1+1,'+x,'-y,'@z,ok,5,-3"
+    asyncio.run(reg.run("write_spreadsheet", {"filename": "f.xlsx", "rows": rows}))
+    from openpyxl import load_workbook
+
+    ws = load_workbook(tmp_path / "f.xlsx").active
+    cells = list(ws[1])
+    assert [c.data_type for c in cells[:4]] == ["s"] * 4
+    assert cells[0].value == "=1+1" and cells[5].value == 5 and cells[6].value == -3
+
+
+def test_document_arg_coercion(tmp_path):
+    (tmp_path / "t.csv").write_text("a\n1\n2\n")
+    reg = make_registry(tmp_path)
+    out = asyncio.run(reg.run("read_spreadsheet", {"filename": "t.csv", "sheet": None, "max_rows": None}))
+    assert "3 rows" in out
+    out = asyncio.run(reg.run("read_spreadsheet", {"filename": "t.csv", "max_rows": "1"}))
+    assert "| a |" in out and "| 1 |" not in out

@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import re
 
-from meclaw.tools.base import Confirmation, ToolContext, ToolSpec
+from meclaw.tools.base import Confirmation, ToolContext, ToolSpec, as_int
 
 _EOL = re.compile(r"[\r\n]+")
 MAX_PDF_PAGES = 30
@@ -24,7 +24,7 @@ def _obj(properties: dict, required: list[str] | None = None) -> dict:
 _S = {"type": "string"}
 
 
-def read_pdf(ctx: ToolContext, filename: str, start_page: int | None = None, end_page: int | None = None) -> str:
+def read_pdf(ctx: ToolContext, filename: str, start_page: int | str | None = None, end_page: int | str | None = None) -> str:
     from pypdf import PdfReader
 
     if not filename:
@@ -38,8 +38,8 @@ def read_pdf(ctx: ToolContext, filename: str, start_page: int | None = None, end
     try:
         reader = PdfReader(str(path))
         total = len(reader.pages)
-        start = int(start_page) if start_page is not None else 1
-        end = int(end_page) if end_page is not None else total
+        start = as_int(start_page, 1)
+        end = as_int(end_page, total)
         if start < 1 or start > total or end < start:
             return "Invalid page range."
         end = min(end, total, start + MAX_PDF_PAGES - 1)
@@ -68,9 +68,16 @@ def _table(rows: list[list]) -> str:
 
 
 def _read_csv(path, limit: int) -> tuple[str, list[list[str]], int, int]:
+    try:
+        return _read_csv_as(path, limit, "utf-8-sig")
+    except UnicodeDecodeError:
+        return _read_csv_as(path, limit, "cp1254")  # Turkish Excel
+
+
+def _read_csv_as(path, limit: int, encoding: str) -> tuple[str, list[list[str]], int, int]:
     head: list[list[str]] = []
     count = columns = 0
-    with open(path, encoding="utf-8-sig", newline="") as fh:
+    with open(path, encoding=encoding, newline="") as fh:
         sample = fh.read(4096)
         fh.seek(0)
         try:
@@ -85,7 +92,8 @@ def _read_csv(path, limit: int) -> tuple[str, list[list[str]], int, int]:
     return path.stem, head, count, columns
 
 
-def read_spreadsheet(ctx: ToolContext, filename: str, sheet: str = "", max_rows: int = DEFAULT_SHEET_ROWS) -> str:
+def read_spreadsheet(ctx: ToolContext, filename: str, sheet: str | None = "", max_rows: int | str | None = DEFAULT_SHEET_ROWS) -> str:
+    sheet = sheet or ""
     if not filename:
         return "No filename provided."
     try:
@@ -94,7 +102,7 @@ def read_spreadsheet(ctx: ToolContext, filename: str, sheet: str = "", max_rows:
         return "Path is outside the workspace."
     if not path.is_file():
         return f"File '{filename}' not found."
-    limit = max(1, min(int(max_rows), MAX_SHEET_ROWS))
+    limit = max(1, min(as_int(max_rows, DEFAULT_SHEET_ROWS), MAX_SHEET_ROWS))
     suffix = path.suffix.lower()
     try:
         if suffix == ".csv":
@@ -127,6 +135,16 @@ def read_spreadsheet(ctx: ToolContext, filename: str, sheet: str = "", max_rows:
     return f"{summary}\n\n{_table(head)}"
 
 
+_FORMULA_STARTS = ("=", "+", "-", "@")
+
+
+def _safe_cell(value):
+    """Keep formula-looking strings from being interpreted as formulas (csv)."""
+    if isinstance(value, str) and value[:1] in _FORMULA_STARTS:
+        return "'" + value
+    return value
+
+
 def write_spreadsheet(ctx: ToolContext, filename: str, rows: list, sheet: str = "Sayfa1") -> str:
     if not filename:
         return "No filename provided."
@@ -145,7 +163,7 @@ def write_spreadsheet(ctx: ToolContext, filename: str, rows: list, sheet: str = 
             with open(path, "w", encoding="utf-8-sig", newline="") as fh:
                 writer = csv.writer(fh)
                 for row in rows:
-                    writer.writerow(["" if c is None else c for c in row])
+                    writer.writerow(["" if c is None else _safe_cell(c) for c in row])
         else:
             from openpyxl import Workbook
 
@@ -155,6 +173,9 @@ def write_spreadsheet(ctx: ToolContext, filename: str, rows: list, sheet: str = 
                 ws.title = (sheet or "Sayfa1")[:31]
                 for row in rows:
                     ws.append(list(row))
+                    for cell in ws[ws.max_row]:
+                        if isinstance(cell.value, str) and cell.value[:1] in _FORMULA_STARTS:
+                            cell.data_type = "s"
                 wb.save(path)
             finally:
                 wb.close()
