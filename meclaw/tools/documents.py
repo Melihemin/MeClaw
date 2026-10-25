@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import csv
-import io
+import re
 
 from meclaw.tools.base import Confirmation, ToolContext, ToolSpec
 
+_EOL = re.compile(r"[\r\n]+")
 MAX_PDF_PAGES = 30
 DEFAULT_SHEET_ROWS = 50
 MAX_SHEET_ROWS = 200
@@ -52,7 +53,7 @@ def read_pdf(ctx: ToolContext, filename: str, start_page: int | None = None, end
 
 
 def _cell(value) -> str:
-    return "" if value is None else str(value).replace("|", "\\|").replace("\n", " ")
+    return "" if value is None else _EOL.sub(" ", str(value).replace("|", "\\|"))
 
 
 def _table(rows: list[list]) -> str:
@@ -66,14 +67,22 @@ def _table(rows: list[list]) -> str:
     return "\n".join(lines)
 
 
-def _read_csv(path) -> tuple[str, list[list[str]], int, int]:
-    text = path.read_text(encoding="utf-8-sig")
-    try:
-        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|")
-    except csv.Error:
-        dialect = csv.excel
-    rows = list(csv.reader(io.StringIO(text), dialect))
-    return path.stem, rows, len(rows), max((len(r) for r in rows), default=0)
+def _read_csv(path, limit: int) -> tuple[str, list[list[str]], int, int]:
+    head: list[list[str]] = []
+    count = columns = 0
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        sample = fh.read(4096)
+        fh.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;	|")
+        except csv.Error:
+            dialect = csv.excel
+        for row in csv.reader(fh, dialect):
+            count += 1
+            columns = max(columns, len(row))
+            if count <= limit:
+                head.append(row)
+    return path.stem, head, count, columns
 
 
 def read_spreadsheet(ctx: ToolContext, filename: str, sheet: str = "", max_rows: int = DEFAULT_SHEET_ROWS) -> str:
@@ -89,9 +98,8 @@ def read_spreadsheet(ctx: ToolContext, filename: str, sheet: str = "", max_rows:
     suffix = path.suffix.lower()
     try:
         if suffix == ".csv":
-            title, rows, count, columns = _read_csv(path)
+            title, head, count, columns = _read_csv(path, limit)
             names = [title]
-            head = rows[:limit]
         elif suffix == ".xlsx":
             from openpyxl import load_workbook
 

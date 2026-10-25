@@ -126,3 +126,14 @@ def test_write_spreadsheet_confirmation(tmp_path):
     assert c.preview == "b | 2\nc | "
     big = reg.needs_confirmation("write_spreadsheet", {"filename": "t.csv", "rows": [["x" * 500]] * 5})
     assert len(big.preview) == 600
+
+
+def test_read_large_csv_streams_rows(tmp_path):
+    _, run = runner(tmp_path)
+    lines = ["a,b,c"] + [f"r{i},{i}" for i in range(1000)]
+    (tmp_path / "big.csv").write_text("\n".join(lines), encoding="utf-8")
+    out = run("read_spreadsheet", filename="big.csv", max_rows=500)
+    assert "big: 1001 rows x 3 columns" in out
+    table = [l for l in out.splitlines() if l.startswith("| ")]
+    assert len(table) == 200
+    assert "| r198 | 198 |" in out and "r300" not in out
