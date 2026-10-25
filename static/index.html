@@ -2,9 +2,35 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MeClaw</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <h1>MeClaw</h1>
+  <div class="app">
+    <aside class="sidebar">
+      <button id="new-chat" type="button" class="new-chat">Yeni sohbet</button>
+      <ul id="conv-list" class="conv-list"></ul>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <label class="field">
+          <span>Sağlayıcı</span>
+          <select id="provider"></select>
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <select id="model"></select>
+        </label>
+        <div id="model-note" class="model-note" hidden></div>
+      </header>
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <form id="composer" class="composer">
+        <textarea id="input" rows="2" placeholder="Bir mesaj yazın… (Enter gönderir, Shift+Enter yeni satır)"></textarea>
+        <button id="send" type="submit">Gönder</button>
+      </form>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
 </body>
 </html>
