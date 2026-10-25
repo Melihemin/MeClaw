@@ -192,3 +192,10 @@ def test_close_open_tool_calls_repairs_every_assistant_message():
         {"role": "user", "content": "2"}, calls_msg("b"), tool_msg("b"),
         {"role": "user", "content": "3"}, calls_msg("c"), cancelled("c"),
     ]
+
+
+def test_system_prompt_tools_paragraph():
+    from meclaw.agent import SYSTEM_PROMPT
+
+    assert "NEVER mention" not in SYSTEM_PROMPT
+    assert "Denied by the user" in SYSTEM_PROMPT and "untrusted data" in SYSTEM_PROMPT
