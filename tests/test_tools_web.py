@@ -124,3 +124,51 @@ def test_web_search_clamps_and_empty(monkeypatch, tmp_path):
 def test_web_tools_only_when_internet(tmp_path):
     assert {"fetch_url", "web_search"} <= make_registry(tmp_path).names()
     assert not {"fetch_url", "web_search"} & make_registry(tmp_path, internet=False).names()
+
+
+def test_html_unclosed_head_keeps_body():
+    assert html_to_text("<head><title>T</title><body><p>vis</p>") == ("T", "vis")
+
+
+def test_html_unclosed_nav_keeps_text_closed_nav_dropped():
+    assert html_to_text("<nav>menu<p>body</p>")[1] == "menu\nbody"
+    assert html_to_text("<nav>menu</nav><p>body</p><footer>f</footer>")[1] == "body"
+
+
+def test_html_unclosed_title_ends_at_next_tag():
+    assert html_to_text("<title>T<p>body")  == ("T", "body")
+
+
+def test_fetch_total_deadline(monkeypatch):
+    public(monkeypatch)
+    monkeypatch.setattr(web, "TOTAL_DEADLINE_SECONDS", 0.2)
+
+    class Slow(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(100):
+                await asyncio.sleep(0.1)
+                yield b"x"
+
+    t = httpx.MockTransport(lambda r: httpx.Response(200, headers={"content-type": "text/plain"}, stream=Slow()))
+    assert asyncio.run(fetch("https://ornek.com", transport=t)) == "Request timed out."
+
+
+@pytest.mark.parametrize("ip", ["100.64.0.1", "fec0::1"])
+def test_blocked_cgnat_and_site_local(monkeypatch, ip):
+    monkeypatch.setattr(web, "_resolve", lambda host: [ip])
+    with pytest.raises(ValueError, match="Blocked address"):
+        check_public_host("ornek.com")
+
+
+@pytest.mark.parametrize("url,host", [
+    ("http://evil@127.0.0.1/", "127.0.0.1"),
+    ("http://[::ffff:127.0.0.1]/", "::ffff:127.0.0.1"),
+    ("http://2130706433/", "2130706433"),
+    ("http://localhost./", "localhost."),
+])
+def test_fetch_blocks_tricky_hosts(monkeypatch, url, host):
+    monkeypatch.setattr(web, "_resolve", lambda h: ["127.0.0.1"])
+    def handler(r):
+        raise AssertionError("transport reached")
+    out = asyncio.run(fetch(url, transport=httpx.MockTransport(handler)))
+    assert out == f"Blocked address: {host}"

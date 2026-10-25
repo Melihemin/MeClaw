@@ -14,11 +14,13 @@ from meclaw.tools.base import ToolContext, ToolSpec
 
 MAX_REDIRECTS = 5
 MAX_BODY_BYTES = 2_000_000
+TOTAL_DEADLINE_SECONDS = 20
 TIMEOUT_SECONDS = 10
 MAX_SEARCH_RESULTS = 10
 USER_AGENT = "MeClaw/1.0"
 
-_SKIP_TAGS = {"script", "style", "noscript", "svg", "head", "nav", "footer"}
+_SKIP_TAGS = {"script", "style", "noscript", "svg"}
+_BUFFER_TAGS = {"nav", "footer"}  # dropped only when properly closed
 _BLOCK_TAGS = {
     "p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "section", "article",
 }
@@ -32,12 +34,14 @@ class _TextExtractor(HTMLParser):
         self.title = ""
         self._parts: list[str] = []
         self._skip: list[str] = []
+        self._buffered: list[tuple[str, int]] = []
         self._in_title = False
 
     def handle_starttag(self, tag, attrs):
-        if tag == "title":
-            self._in_title = True
-        if tag in _SKIP_TAGS:
+        self._in_title = tag == "title"
+        if tag in _BUFFER_TAGS:
+            self._buffered.append((tag, len(self._parts)))
+        elif tag in _SKIP_TAGS:
             self._skip.append(tag)
         elif tag in _BLOCK_TAGS and not self._skip:
             self._parts.append("\n")
@@ -49,7 +53,13 @@ class _TextExtractor(HTMLParser):
     def handle_endtag(self, tag):
         if tag == "title":
             self._in_title = False
-        if tag in _SKIP_TAGS:
+        if tag in _BUFFER_TAGS:
+            for i in range(len(self._buffered) - 1, -1, -1):
+                if self._buffered[i][0] == tag:
+                    del self._parts[self._buffered[i][1]:]
+                    del self._buffered[i:]
+                    break
+        elif tag in _SKIP_TAGS:
             if tag in self._skip:
                 while self._skip and self._skip.pop() != tag:
                     pass
@@ -87,7 +97,9 @@ def _is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         if _is_blocked(ip.ipv4_mapped):
             return True
     return (
-        ip.is_private or ip.is_loopback or ip.is_link_local
+        not ip.is_global
+        or getattr(ip, "is_site_local", False)
+        or ip.is_private or ip.is_loopback or ip.is_link_local
         or ip.is_reserved or ip.is_multicast or ip.is_unspecified
     )
 
@@ -151,7 +163,8 @@ async def fetch(url: str, transport: httpx.AsyncBaseTransport | None = None) -> 
             timeout=TIMEOUT_SECONDS,
             transport=transport,
             headers={"User-Agent": USER_AGENT},
-        ) as client:
+            trust_env=False,
+        ) as client, asyncio.timeout(TOTAL_DEADLINE_SECONDS):
             current = url
             for _ in range(MAX_REDIRECTS + 1):
                 _check_url(current)
@@ -176,7 +189,7 @@ async def fetch(url: str, transport: httpx.AsyncBaseTransport | None = None) -> 
             return "Too many redirects."
     except ValueError as exc:
         return str(exc)
-    except httpx.TimeoutException:
+    except (httpx.TimeoutException, TimeoutError):
         return "Request timed out."
     except Exception as exc:
         return f"Request failed: {exc}"
