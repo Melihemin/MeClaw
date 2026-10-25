@@ -1,5 +1,11 @@
-python-telegram-bot
 python-dotenv
-ollama
-requests
+ollama>=0.6,<0.7
 python-docx
+fastapi
+uvicorn
+openai>=3.37,<4
+pytest
+httpx
+pypdf>=6,<7
+openpyxl>=3.1,<4
+ddgs>=9,<10

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MeClaw</title>
+  <script>
+    // Apply the saved theme before first paint to avoid a light/dark flash.
+    try {
+      var t = localStorage.getItem("meclaw.theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { /* storage unavailable */ }
+  </script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-top">
+        <span class="brand">MeClaw</span>
+        <button id="close-sidebar" class="icon-btn" type="button" aria-label="Menüyü kapat" title="Menüyü kapat">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+        </button>
+      </div>
+      <button id="new-chat" class="side-btn" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        <span>Yeni sohbet</span>
+      </button>
+      <div class="side-label">Sohbetler</div>
+      <ul id="conv-list" class="conv-list"></ul>
+      <div class="sidebar-bottom">
+        <button id="open-settings" class="side-btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+          <span>Ayarlar</span>
+        </button>
+      </div>
+    </aside>
+    <div id="scrim" class="scrim"></div>
+
+    <main class="main" id="main">
+      <header class="topbar">
+        <button id="open-sidebar" class="icon-btn" type="button" aria-label="Menüyü aç" title="Menüyü aç">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+        </button>
+        <div class="model-picker">
+          <button id="model-button" class="model-button" type="button" aria-haspopup="true" aria-expanded="false">
+            <span id="model-label">Model seçin</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="model-menu" class="model-menu" role="menu" hidden></div>
+        </div>
+        <button id="new-chat-top" class="icon-btn" type="button" aria-label="Yeni sohbet" title="Yeni sohbet">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </button>
+        <button id="open-files" class="icon-btn" type="button" aria-label="Dosyalar" title="Dosyalar" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+        </button>
+      </header>
+
+      <div id="banner" class="banner" hidden>
+        <span id="banner-text"></span>
+        <button id="banner-settings" class="link-btn" type="button">Ayarları aç</button>
+      </div>
+
+      <div id="thread" class="thread">
+        <div id="messages" class="messages" aria-live="polite"></div>
+      </div>
+
+      <div class="composer-wrap">
+        <h1 class="hero">Bugün nasıl yardımcı olabilirim?</h1>
+        <form id="composer" class="composer">
+          <textarea id="input" rows="1" placeholder="Bir şey sorun…" aria-label="Mesaj"></textarea>
+          <button id="send" class="send-btn" type="submit" aria-label="Gönder" title="Gönder">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </form>
+        <p class="hint">Enter gönderir, Shift+Enter yeni satır. MeClaw hata yapabilir.</p>
+      </div>
+    </main>
+
+    <aside id="files" class="files" aria-label="Dosyalar" hidden>
+      <header class="files-head">
+        <strong>Dosyalar</strong>
+        <div class="files-actions">
+          <label class="icon-btn" title="Dosya yükle" aria-label="Dosya yükle">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>
+            <input id="files-upload" type="file" multiple hidden>
+          </label>
+          <button id="files-open" class="icon-btn" type="button" title="Klasörü Gezgin'de aç" aria-label="Klasörü Gezgin'de aç">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+          </button>
+          <button id="files-refresh" class="icon-btn" type="button" title="Yenile" aria-label="Yenile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+          </button>
+          <button id="files-close" class="icon-btn" type="button" title="Kapat" aria-label="Kapat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+      </header>
+      <nav id="files-crumbs" class="crumbs" aria-label="Klasör yolu"></nav>
+      <ul id="files-list" class="files-list"></ul>
+      <section id="files-preview" class="files-preview" hidden>
+        <header class="preview-head">
+          <button id="preview-back" class="icon-btn" type="button" title="Geri" aria-label="Geri">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <span id="preview-name" class="preview-name"></span>
+          <a id="preview-download" class="icon-btn" title="İndir" aria-label="İndir" download>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg>
+          </a>
+        </header>
+        <div id="preview-body" class="preview-body"></div>
+      </section>
+      <div id="files-status" class="files-status" role="status"></div>
+      <div class="drop-hint">Yüklemek için bırakın</div>
+    </aside>
+  </div>
+
+  <dialog id="settings" class="settings" aria-labelledby="settings-title">
+    <form id="settings-form" method="dialog">
+      <header class="settings-head">
+        <h2 id="settings-title">Ayarlar</h2>
+        <button id="settings-close" class="icon-btn" type="button" aria-label="Kapat" title="Kapat">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="settings-body">
+        <section>
+          <h3>Genel</h3>
+          <label class="row">
+            <span>Tema</span>
+            <select id="set-theme">
+              <option value="system">Sistem</option>
+              <option value="light">Açık</option>
+              <option value="dark">Koyu</option>
+            </select>
+          </label>
+        </section>
+
+        <section>
+          <h3>Sağlayıcılar</h3>
+          <label class="stack">
+            <span>Ollama adresi</span>
+            <input id="set-ollama" type="url" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="stack">
+            <span>OpenAI API anahtarı</span>
+            <input id="set-key" type="password" autocomplete="off" spellcheck="false">
+          </label>
+          <div class="key-row">
+            <span id="key-status" class="muted"></span>
+            <button id="clear-key" class="link-btn danger" type="button">Anahtarı sil</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Çalışma alanı</h3>
+          <label class="stack">
+            <span>Çalışma klasörü</span>
+            <input id="set-workspace" type="text" autocomplete="off" spellcheck="false">
+          </label>
+          <div class="key-row">
+            <span class="muted small">Asistanın dosya araçları yalnızca bu klasörde çalışır. Yoksa oluşturulur.</span>
+            <button id="reset-workspace" class="link-btn" type="button">Varsayılana dön</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Varsayılan model</h3>
+          <p class="muted small">Yeni sohbetler bu sağlayıcı ve modelle başlar.</p>
+          <div class="two">
+            <label class="stack">
+              <span>Sağlayıcı</span>
+              <select id="set-default-provider"></select>
+            </label>
+            <label class="stack">
+              <span>Model</span>
+              <input id="set-default-model" list="known-models" autocomplete="off" spellcheck="false" placeholder="ör. qwen3:8b">
+              <datalist id="known-models"></datalist>
+            </label>
+          </div>
+        </section>
+
+        <section>
+          <h3>Kişiselleştirme</h3>
+          <label class="stack">
+            <span>Sistem istemi</span>
+            <textarea id="set-prompt" rows="7" spellcheck="false"></textarea>
+          </label>
+          <div class="key-row">
+            <span class="muted small">Asistanın nasıl davranacağını belirler.</span>
+            <button id="reset-prompt" class="link-btn" type="button">Varsayılana dön</button>
+          </div>
+        </section>
+
+        <section id="tools-section">
+          <h3>Araçlar</h3>
+          <label class="check-row">
+            <input id="set-internet" type="checkbox">
+            <span>İnternet erişimi (web arama ve sayfa okuma)</span>
+          </label>
+          <label class="check-row">
+            <input id="set-memory" type="checkbox">
+            <span>Hafıza (asistan sizinle ilgili notlar tutar)</span>
+          </label>
+        </section>
+
+        <section id="memory-section">
+          <h3>Hafıza</h3>
+          <p id="memory-off-note" class="muted small" hidden>Hafıza kapalı; asistan bu notları kullanmıyor.</p>
+          <ul id="memory-list" class="memory-list"></ul>
+          <div class="memory-add">
+            <input id="memory-new" type="text" maxlength="500" placeholder="Not ekle" aria-label="Not ekle" autocomplete="off">
+            <button id="memory-add" class="btn" type="button">Ekle</button>
+          </div>
+          <div class="key-row">
+            <span class="muted small">Notlar anında kaydedilir.</span>
+            <button id="memory-clear" class="link-btn danger" type="button">Tümünü sil</button>
+          </div>
+        </section>
+      </div>
+
+      <footer class="settings-foot">
+        <span id="settings-status" class="settings-status" role="status"></span>
+        <button id="settings-cancel" class="btn" type="button">İptal</button>
+        <button id="settings-save" class="btn primary" type="submit">Kaydet</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
