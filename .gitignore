@@ -45,3 +45,6 @@ __pycache__/
 TODO.md
 
 tools/finder/testdir/**
+
+## App data
+data/
