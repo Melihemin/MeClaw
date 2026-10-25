@@ -17,5 +17,5 @@ def build_system_prompt(base: str, memories: list[dict], memory_enabled: bool) -
     if not memory_enabled:
         return base
     newest = sorted(memories, key=lambda m: m["id"])[-MAX_PROMPT_MEMORIES:]
-    lines = [f"[{m['id']}] {m['content']}" for m in newest] or ["(none yet)"]
+    lines = [f"[{m['id']}] {' '.join(m['content'].split())}" for m in newest] or ["(none yet)"]
     return f"{base}\n\n{MEMORY_RULES}\n\nKnown facts about the user:\n" + "\n".join(lines)

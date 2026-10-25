@@ -258,3 +258,9 @@ def test_disabled_internet_tool_unknown(client, h):
     h.provider.turns = [[ChatEvent("tool_calls", tool_calls=[call])], [ChatEvent("text", "ok")]]
     text = chat(client).text
     assert "Unknown tool: web_search" in text and "event: done" in text
+
+
+@pytest.mark.parametrize("mid", [str(2**64), "0", "-1", "abc"])
+def test_memory_id_bounds(client, mid):
+    assert client.put(f"/api/memories/{mid}", json={"content": "x"}, headers=LOCAL).status_code == 422
+    assert client.delete(f"/api/memories/{mid}", headers=LOCAL).status_code == 422

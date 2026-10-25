@@ -143,6 +143,14 @@ class Storage:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_memory(self, memory_id: int) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, content, created_at, updated_at FROM memories WHERE id = ?",
+                (memory_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def add_memory(self, content: str) -> dict:
         now = _now()
         with self._connect() as conn:

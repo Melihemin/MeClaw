@@ -10,11 +10,11 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable
+from typing import Annotated, Callable
 from urllib.parse import urlparse
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Path as PathParam, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -44,6 +44,8 @@ _HOST_PATTERN = re.compile(r"^https?://\S+$")
 MAX_PROMPT_LENGTH = 8000
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 LOCAL_HEADER = "X-MeClaw"
+MAX_ID = 2**63 - 1  # SQLite integer range
+MemoryId = Annotated[int, PathParam(ge=1, le=MAX_ID)]
 CONFIRM_TIMEOUT = 300  # seconds a destructive tool call waits for the user's decision
 
 # apply_settings(changes) saves {ENV_NAME: value | None} and returns the reloaded
@@ -281,15 +283,18 @@ def create_app(
         return storage.add_memory(clean_memory(body))
 
     @app.put("/api/memories/{memory_id}")
-    def update_memory(request: Request, memory_id: int, body: MemoryBody):
+    def update_memory(request: Request, memory_id: MemoryId, body: MemoryBody):
         require_local(request)
         content = clean_memory(body)
         if not storage.update_memory(memory_id, content):
             raise HTTPException(404, detail="Memory not found")
-        return next(m for m in storage.list_memories() if m["id"] == memory_id)
+        updated = storage.get_memory(memory_id)
+        if updated is None:
+            raise HTTPException(404, detail="Memory not found")
+        return updated
 
     @app.delete("/api/memories/{memory_id}", status_code=204)
-    def delete_memory(request: Request, memory_id: int):
+    def delete_memory(request: Request, memory_id: MemoryId):
         require_local(request)
         if not storage.delete_memory(memory_id):
             raise HTTPException(404, detail="Memory not found")

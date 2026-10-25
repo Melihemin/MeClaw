@@ -4,6 +4,8 @@ from __future__ import annotations
 from meclaw.memory import MAX_MEMORY_CHARS
 from meclaw.tools.base import ToolContext, ToolSpec
 
+MAX_ID = 2**63 - 1  # SQLite integer range
+
 
 def remember(ctx: ToolContext, content: str) -> str:
     text = str(content).strip()
@@ -15,10 +17,16 @@ def remember(ctx: ToolContext, content: str) -> str:
 
 
 def forget(ctx: ToolContext, memory_id: int) -> str:
-    memory_id = int(memory_id)
-    if ctx.storage.delete_memory(memory_id):
+    given = memory_id
+    if isinstance(memory_id, str) and memory_id.strip().isdecimal():
+        memory_id = int(memory_id)
+    if (
+        isinstance(memory_id, int) and not isinstance(memory_id, bool)
+        and 1 <= memory_id <= MAX_ID and ctx.storage.delete_memory(memory_id)
+    ):
         return f"Forgot memory #{memory_id}."
-    return f"No memory #{memory_id}."
+    return f"No memory #{given}."
+
 
 
 MEMORY_TOOLS: list[ToolSpec] = [
