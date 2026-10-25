@@ -36,3 +36,9 @@ def test_list_items_is_readable(registry):
     registry.run("create_file_tool", {"filename": "a.txt"})
     out = registry.run("list_items_tool", {})
     assert out.startswith("Workspace contents:") and "📁 docs" in out and "📄 a.txt" in out
+
+
+def test_long_result_truncated(registry, tmp_path):
+    (tmp_path / "big.txt").write_text("a" * 50000, encoding="utf-8")
+    out = registry.run("read_file_tool", {"filename": "big.txt"})
+    assert out == "a" * 20000 + chr(10) + "…(truncated)"

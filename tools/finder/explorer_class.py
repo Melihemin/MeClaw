@@ -16,9 +16,11 @@ class Explorer:
         self.base_dir = Path(base_dir or os.path.join(os.path.dirname(__file__), "testdir")).resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
-    def _build_path(self, name: str) -> Path:
+    def _build_path(self, name: str, allow_root: bool = False) -> Path:
         path = (self.base_dir / name).resolve()
         if not path.is_relative_to(self.base_dir):
+            raise ValueError("Path is outside the workspace.")
+        if not allow_root and path == self.base_dir:
             raise ValueError("Path is outside the workspace.")
         return path
 

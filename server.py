@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -25,6 +27,8 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_TITLE = "Yeni sohbet"
 TITLE_LENGTH = 40
+DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_\-*.…]+")
 
 
 class ChatRequest(BaseModel):
@@ -38,8 +42,22 @@ def sse(name: str, data: dict) -> str:
     return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def create_app(providers: dict[str, Provider], registry: ToolRegistry, storage: Storage) -> FastAPI:
+def redact(text: str) -> str:
+    """Hide API keys (full or masked) that provider errors may echo back."""
+    return _KEY_PATTERN.sub("sk-***", text)
+
+
+def create_app(
+    providers: dict[str, Provider],
+    registry: ToolRegistry,
+    storage: Storage,
+    allowed_hosts: list[str] | None = None,
+) -> FastAPI:
     app = FastAPI()
+    # Reject foreign Host headers so DNS rebinding cannot reach the local API.
+    app.add_middleware(
+        TrustedHostMiddleware, allowed_hosts=allowed_hosts or DEFAULT_ALLOWED_HOSTS
+    )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     def get_provider(name: str) -> Provider:
@@ -59,8 +77,9 @@ def create_app(providers: dict[str, Provider], registry: ToolRegistry, storage: 
             try:
                 ready, reason = await provider.status()
             except Exception as exc:
-                logger.exception("Provider status failed: %s", name)
-                ready, reason = False, str(exc)
+                reason = redact(str(exc))
+                logger.error("Provider status failed: %s: %s", name, reason)
+                ready = False
             result.append({"name": name, "ready": bool(ready), "reason": reason})
         return result
 
@@ -70,8 +89,9 @@ def create_app(providers: dict[str, Provider], registry: ToolRegistry, storage: 
         try:
             return {"models": await p.list_models()}
         except Exception as exc:
-            logger.exception("Listing models failed: %s", provider)
-            raise HTTPException(503, detail=str(exc))
+            detail = redact(str(exc))
+            logger.error("Listing models failed: %s: %s", provider, detail)
+            raise HTTPException(503, detail=detail)
 
     @app.get("/api/conversations")
     def list_conversations():
@@ -125,10 +145,14 @@ def create_app(providers: dict[str, Provider], registry: ToolRegistry, storage: 
                                 "result": event.result,
                             })
                 except Exception as exc:
-                    logger.exception("Chat failed (provider=%s, model=%s)", req.provider, req.model)
-                    yield sse("error", {"message": str(exc)})
+                    message = redact(str(exc))
+                    logger.error(
+                        "Chat failed (provider=%s, model=%s): %s", req.provider, req.model, message
+                    )
+                    yield sse("error", {"message": message})
             finally:
-                # Runs on normal end and on client disconnect (GeneratorExit/CancelledError).
+                # Runs on normal end and on client disconnect (GeneratorExit/CancelledError);
+                # run_agent records partial text on those too, so it is saved here.
                 if new_messages:
                     try:
                         storage.add_messages(req.conversation_id, new_messages)

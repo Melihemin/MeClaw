@@ -121,3 +121,16 @@ def test_status_when_unreachable():
     provider = make(FakeClient(list_error=ConnectionError("down")))
     ready, reason = asyncio.run(provider.status())
     assert ready is False and "Ollama" in reason
+
+
+def test_list_models_times_out(monkeypatch):
+    import meclaw.llm.ollama as mod
+
+    class Hang:
+        async def list(self):
+            await asyncio.sleep(10)
+
+    real = asyncio.wait_for
+    monkeypatch.setattr(mod.asyncio, "wait_for", lambda coro, timeout: real(coro, 0.05))
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(make(Hang()).list_models())

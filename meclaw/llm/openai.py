@@ -10,7 +10,7 @@ from meclaw.llm.base import ChatEvent, ToolCall
 
 NO_KEY_MESSAGE = "OPENAI_API_KEY tanımlı değil"
 
-_EXCLUDED = ("audio", "realtime", "transcribe", "tts", "image", "search", "instruct")
+_EXCLUDED = ("audio", "realtime", "transcribe", "tts", "image", "search", "instruct", "pro", "codex")
 
 
 def to_openai_messages(messages: list[dict]) -> list[dict]:

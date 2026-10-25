@@ -50,7 +50,8 @@ async def run_agent(
                     yield AgentEvent("text", text=event.text)
                 elif event.type == "tool_calls":
                     calls.extend(event.tool_calls)
-        except Exception:
+        except BaseException:
+            # Includes CancelledError/GeneratorExit (client disconnect): keep partial text.
             if text:
                 new_messages.append({"role": "assistant", "content": text})
             raise
@@ -71,10 +72,10 @@ async def run_agent(
 
         for c in calls:
             result = registry.run(c.name, c.arguments)
-            yield AgentEvent("tool", name=c.name, arguments=c.arguments, result=result)
             tool_msg = {"role": "tool", "content": result, "tool_call_id": c.id, "name": c.name}
             messages.append(tool_msg)
             new_messages.append(dict(tool_msg))
+            yield AgentEvent("tool", name=c.name, arguments=c.arguments, result=result)
 
     new_messages.append({"role": "assistant", "content": LIMIT_MESSAGE})
     yield AgentEvent("text", text=LIMIT_MESSAGE)

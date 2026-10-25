@@ -32,3 +32,14 @@ def test_allows_nested_paths(explorer, tmp_path):
     explorer.create_folder("sub")
     assert explorer.create_file("sub/a.txt") == "File 'sub/a.txt' created successfully."
     assert (tmp_path / "ws" / "sub" / "a.txt").exists()
+
+
+def test_rejects_workspace_root(explorer, tmp_path):
+    for root in (".", "", "sub/.."):
+        assert explorer.remove_folder(root) in (OUTSIDE, "No folder name provided.")
+    assert explorer.remove_folder(".") == OUTSIDE
+    assert explorer.copy_folder(".", "x") == OUTSIDE
+    assert explorer.copy_folder("x", "./") == OUTSIDE
+    assert explorer.rename_folder(".", "y") == OUTSIDE
+    assert (tmp_path / "ws").exists()
+    assert explorer.list_items() == []

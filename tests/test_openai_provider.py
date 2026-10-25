@@ -73,7 +73,7 @@ def test_to_openai_messages():
 
 
 def test_filter_chat_models():
-    ids = ["gpt-4o", "gpt-4o-audio-preview", "o3-mini", "dall-e-3", "text-embedding-3-small", "gpt-4o-realtime-preview", "gpt-4o-mini-tts", "o4-mini"]
+    ids = ["gpt-4o", "gpt-4o-audio-preview", "o3-mini", "dall-e-3", "text-embedding-3-small", "gpt-4o-realtime-preview", "gpt-4o-mini-tts", "o4-mini", "o1-pro", "gpt-5-pro", "gpt-5-codex"]
     assert filter_chat_models(ids) == ["gpt-4o", "o3-mini", "o4-mini"]
 
 

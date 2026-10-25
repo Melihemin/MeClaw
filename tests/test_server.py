@@ -26,6 +26,10 @@ def parse_sse(text: str) -> list[tuple[str, dict]]:
     return events
 
 
+def make_client(app):
+    return TestClient(app, base_url="http://127.0.0.1")
+
+
 @pytest.fixture
 def store(tmp_path):
     return Storage(tmp_path / "test.db")
@@ -38,11 +42,11 @@ def registry(tmp_path):
 
 @pytest.fixture
 def client(registry, store):
-    return TestClient(create_app({"fake": FakeProvider()}, registry, store))
+    return make_client(create_app({"fake": FakeProvider()}, registry, store))
 
 
 def make_chat(provider, registry, store):
-    c = TestClient(create_app({"fake": provider}, registry, store))
+    c = make_client(create_app({"fake": provider}, registry, store))
     cid = c.post("/api/conversations").json()["id"]
     return c, cid
 
@@ -62,7 +66,7 @@ def test_providers_never_500(registry, store):
         async def status(self):
             raise RuntimeError("x")
 
-    c = TestClient(create_app({"down": down, "boom": Boom(name="boom")}, registry, store))
+    c = make_client(create_app({"down": down, "boom": Boom(name="boom")}, registry, store))
     r = c.get("/api/providers")
     assert r.status_code == 200
     assert {p["name"]: p["ready"] for p in r.json()} == {"down": False, "boom": False}
@@ -74,7 +78,7 @@ def test_models(client):
 
 def test_models_provider_failure_503(registry, store):
     p = FakeProvider(models_error=RuntimeError("401 invalid key"))
-    r = TestClient(create_app({"fake": p}, registry, store)).get("/api/models", params={"provider": "fake"})
+    r = make_client(create_app({"fake": p}, registry, store)).get("/api/models", params={"provider": "fake"})
     assert r.status_code == 503 and "invalid key" in r.json()["detail"]
 
 
@@ -154,3 +158,25 @@ def test_chat_unknown_provider_404(client):
     r = client.post("/api/chat", json={"conversation_id": cid, "provider": "x", "model": "m", "message": "hi"})
     assert r.status_code == 404
     assert client.get(f"/api/conversations/{cid}").json()["messages"] == []
+
+
+def test_rejects_foreign_host_header(client):
+    r = client.get("/api/conversations", headers={"Host": "evil.example.com"})
+    assert r.status_code == 400
+    assert client.get("/api/conversations", headers={"Host": "localhost:8000"}).status_code == 200
+
+
+def test_chat_error_redacts_api_key(registry, store, caplog):
+    secret = "Incorrect API key provided: sk-abc**********wxyz"
+    p = FakeProvider(turns=[[ChatEvent("text", "a")]], error=RuntimeError(secret))
+    c, cid = make_chat(p, registry, store)
+    with caplog.at_level("ERROR"):
+        text = c.post("/api/chat", json=body(cid, "x")).text
+    assert "sk-abc" not in text and "wxyz" not in text and "sk-***" in text
+    assert "sk-abc" not in caplog.text and "wxyz" not in caplog.text
+
+
+def test_models_error_redacts_api_key(registry, store):
+    p = FakeProvider(models_error=RuntimeError("Incorrect API key provided: sk-abc…wxyz"))
+    r = make_client(create_app({"fake": p}, registry, store)).get("/api/models", params={"provider": "fake"})
+    assert r.status_code == 503 and "wxyz" not in r.json()["detail"] and "sk-***" in r.json()["detail"]

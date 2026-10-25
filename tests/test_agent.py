@@ -55,3 +55,25 @@ def test_partial_text_saved_on_error(registry):
     with pytest.raises(RuntimeError):
         collect(run_agent(p, "m", [{"role": "user", "content": "x"}], registry, new))
     assert new == [{"role": "assistant", "content": "Yarım"}]
+
+
+def test_multiple_tool_calls_in_one_turn(registry):
+    calls = [ToolCall("a", "create_file_tool", {"filename": "1.txt"}), ToolCall("b", "create_file_tool", {"filename": "2.txt"})]
+    p = FakeProvider(turns=[[ChatEvent("tool_calls", tool_calls=calls)], [ChatEvent("text", "ok")]])
+    new = []
+    collect(run_agent(p, "m", [{"role": "user", "content": "x"}], registry, new))
+    assert [m["role"] for m in new] == ["assistant", "tool", "tool", "assistant"]
+    assert [m.get("tool_call_id") for m in new[1:3]] == ["a", "b"]
+
+
+def test_partial_text_kept_on_generator_close(registry):
+    p = FakeProvider(turns=[[ChatEvent("text", "Yar"), ChatEvent("text", "ım")]])
+    new = []
+
+    async def _run():
+        agen = run_agent(p, "m", [{"role": "user", "content": "x"}], registry, new)
+        await agen.__anext__()
+        await agen.aclose()
+
+    asyncio.run(_run())
+    assert new == [{"role": "assistant", "content": "Yar"}]

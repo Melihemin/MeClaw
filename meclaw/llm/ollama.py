@@ -49,7 +49,7 @@ class OllamaProvider:
         return True, ""
 
     async def list_models(self) -> list[str]:
-        response = await self.client.list()
+        response = await asyncio.wait_for(self.client.list(), 5)
         return sorted(m.model for m in response.models)
 
     async def _stream(self, model: str, messages: list[dict], tools: list[dict] | None):
