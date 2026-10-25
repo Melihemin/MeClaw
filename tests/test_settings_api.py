@@ -5,8 +5,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from meclaw.agent import SYSTEM_PROMPT
-from meclaw.config import Settings
-from meclaw.llm.base import ChatEvent
+from meclaw.config import Settings, parse_flag
+from meclaw.llm.base import ChatEvent, ToolCall
 from meclaw.storage import Storage
 from server import create_app
 from tests.fakes import FakeProvider, make_registry
@@ -32,8 +32,12 @@ class Harness:
             "OLLAMA_HOST": "ollama_host", "OPENAI_API_KEY": "openai_api_key",
             "MECLAW_DEFAULT_PROVIDER": "default_provider", "MECLAW_DEFAULT_MODEL": "default_model",
             "MECLAW_SYSTEM_PROMPT": "system_prompt", "MECLAW_WORKSPACE": "workspace_dir",
+            "MECLAW_INTERNET": "internet_enabled", "MECLAW_MEMORY": "memory_enabled",
         }
         updates = {fields[k]: v for k, v in changes.items()}
+        for flag in ("internet_enabled", "memory_enabled"):
+            if flag in updates:
+                updates[flag] = parse_flag(updates[flag])
         if updates.get("ollama_host", "") is None:
             updates["ollama_host"] = "http://localhost:11434"
         if "workspace_dir" in updates:
@@ -57,12 +61,16 @@ def built():
 def client(tmp_path, h, built):
     def build(settings):
         built.append(settings.workspace_dir)
-        return make_registry(settings.workspace_dir)
+        return make_registry(
+            settings.workspace_dir, storage=storage,
+            internet=settings.internet_enabled, memory=settings.memory_enabled,
+        )
 
+    storage = Storage(tmp_path / "t.db")
     app = create_app(
         {"fake": h.provider},
-        make_registry(tmp_path / "ws"),
-        Storage(tmp_path / "t.db"),
+        make_registry(tmp_path / "ws", storage=storage),
+        storage,
         settings=BASE,
         apply_settings=h.apply,
         make_registry=build,
@@ -139,7 +147,8 @@ def test_custom_system_prompt_reaches_model(client, h):
     client.put("/api/settings", json={"system_prompt": "Kısa yanıt ver."})
     cid = client.post("/api/conversations").json()["id"]
     client.post("/api/chat", json={"conversation_id": cid, "provider": "fake", "model": "m", "message": "x"})
-    assert h.provider.calls[0][0] == {"role": "system", "content": "Kısa yanıt ver."}
+    system = h.provider.calls[0][0]
+    assert system["role"] == "system" and system["content"].startswith("Kısa yanıt ver.\n\n")
 
 
 def test_settings_unavailable_without_apply(tmp_path):
@@ -180,3 +189,72 @@ def test_blank_workspace_resets_to_default(client, h):
 def test_bad_workspace_rejected(client, h, value):
     assert client.put("/api/settings", json={"workspace": value}).status_code == 400
     assert h.calls == []
+
+
+LOCAL = {"X-MeClaw": "1"}
+
+
+def chat(client, text="x"):
+    cid = client.post("/api/conversations").json()["id"]
+    return client.post("/api/chat", json={"conversation_id": cid, "provider": "fake", "model": "m", "message": text})
+
+
+def test_flags_saved_and_rebuild(client, h, built):
+    client.put("/api/settings", json={"internet_enabled": False})
+    assert h.calls[-1] == {"MECLAW_INTERNET": "0"} and len(built) == 1
+    client.put("/api/settings", json={"internet_enabled": True})
+    assert h.calls[-1] == {"MECLAW_INTERNET": None} and len(built) == 2
+    client.put("/api/settings", json={"memory_enabled": False})
+    assert h.calls[-1] == {"MECLAW_MEMORY": "0"} and len(built) == 3
+    data = client.get("/api/settings").json()
+    assert data["internet_enabled"] is True and data["memory_enabled"] is False
+
+
+def test_memories_api(client):
+    r = client.post("/api/memories", json={"content": " Adım Melih "}, headers=LOCAL)
+    mid = r.json()["id"]
+    assert client.get("/api/memories").json()[0]["content"] == "Adım Melih"
+    r = client.put(f"/api/memories/{mid}", json={"content": "Melih Emin"}, headers=LOCAL)
+    assert r.status_code == 200 and r.json()["content"] == "Melih Emin" and r.json()["id"] == mid
+    assert client.put("/api/memories/999", json={"content": "x"}, headers=LOCAL).status_code == 404
+    assert client.post("/api/memories", json={"content": " "}, headers=LOCAL).status_code == 400
+    assert client.post("/api/memories", json={"content": "x" * 501}, headers=LOCAL).status_code == 400
+    assert client.put(f"/api/memories/{mid}", json={"content": ""}, headers=LOCAL).status_code == 400
+    assert client.post("/api/memories", json={"content": "x"}).status_code == 403
+    assert client.put(f"/api/memories/{mid}", json={"content": "x"}).status_code == 403
+    assert client.delete(f"/api/memories/{mid}").status_code == 403
+    assert client.delete("/api/memories").status_code == 403
+    assert client.delete(f"/api/memories/{mid}", headers=LOCAL).status_code == 204
+    assert client.delete(f"/api/memories/{mid}", headers=LOCAL).status_code == 404
+    client.post("/api/memories", json={"content": "a"}, headers=LOCAL)
+    assert client.delete("/api/memories", headers=LOCAL).json() == {"deleted": 1}
+
+
+def test_memories_reach_system_prompt(client, h):
+    client.post("/api/memories", json={"content": "Adım Melih"}, headers=LOCAL)
+    chat(client)
+    assert "[1] Adım Melih" in h.provider.calls[0][0]["content"]
+
+
+def test_memory_off_keeps_prompt_plain(client, h):
+    client.post("/api/memories", json={"content": "Adım Melih"}, headers=LOCAL)
+    client.put("/api/settings", json={"memory_enabled": False})
+    chat(client)
+    assert h.provider.calls[0][0] == {"role": "system", "content": SYSTEM_PROMPT}
+
+
+def test_no_settings_means_plain_prompt(tmp_path):
+    provider = FakeProvider(turns=[[ChatEvent("text", "ok")]])
+    storage = Storage(tmp_path / "t.db")
+    storage.add_memory("Adım Melih")
+    c = TestClient(create_app({"fake": provider}, make_registry(tmp_path / "ws"), storage), base_url="http://127.0.0.1")
+    chat(c)
+    assert provider.calls[0][0] == {"role": "system", "content": SYSTEM_PROMPT}
+
+
+def test_disabled_internet_tool_unknown(client, h):
+    client.put("/api/settings", json={"internet_enabled": False})
+    call = ToolCall("c1", "web_search", {"query": "x"})
+    h.provider.turns = [[ChatEvent("tool_calls", tool_calls=[call])], [ChatEvent("text", "ok")]]
+    text = chat(client).text
+    assert "Unknown tool: web_search" in text and "event: done" in text

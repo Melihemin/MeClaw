@@ -26,6 +26,7 @@ from meclaw.config import DEFAULT_WORKSPACE, Settings, load_settings
 from meclaw.llm.base import Provider
 from meclaw.llm.ollama import OllamaProvider
 from meclaw.llm.openai import OpenAIProvider
+from meclaw.memory import MAX_MEMORY_CHARS, build_system_prompt
 from meclaw.settings_store import save_settings
 from meclaw.storage import Storage
 from meclaw.tools import build_registry
@@ -70,6 +71,12 @@ class SettingsUpdate(BaseModel):
     default_model: str | None = None
     system_prompt: str | None = None
     workspace: str | None = None
+    internet_enabled: bool | None = None
+    memory_enabled: bool | None = None
+
+
+class MemoryBody(BaseModel):
+    content: str
 
 
 def sse(name: str, data: dict) -> str:
@@ -189,6 +196,8 @@ def create_app(
             "system_prompt_default": SYSTEM_PROMPT,
             "workspace": str(s.workspace_dir),
             "workspace_default": str(DEFAULT_WORKSPACE),
+            "internet_enabled": s.internet_enabled,
+            "memory_enabled": s.memory_enabled,
             "providers": list(state.providers),
         }
 
@@ -239,12 +248,57 @@ def create_app(
                 except OSError as exc:
                     raise HTTPException(400, detail=f"Klasör oluşturulamadı: {exc.strerror or exc}")
             changes["MECLAW_WORKSPACE"] = raw or None
+        if req.internet_enabled is not None:
+            changes["MECLAW_INTERNET"] = None if req.internet_enabled else "0"
+        if req.memory_enabled is not None:
+            changes["MECLAW_MEMORY"] = None if req.memory_enabled else "0"
         if changes:
-            old_workspace = state.settings.workspace_dir
+            old = state.settings
             state.settings, state.providers = apply_settings(changes)
-            if make_registry and state.settings.workspace_dir != old_workspace:
+            if make_registry and (
+                state.settings.workspace_dir != old.workspace_dir
+                or state.settings.internet_enabled != old.internet_enabled
+                or state.settings.memory_enabled != old.memory_enabled
+            ):
                 state.registry = make_registry(state.settings)
         return settings_payload()
+
+    def clean_memory(body: MemoryBody) -> str:
+        content = body.content.strip()
+        if not content:
+            raise HTTPException(400, detail="Memory is empty.")
+        if len(content) > MAX_MEMORY_CHARS:
+            raise HTTPException(400, detail=f"Memory is too long (max {MAX_MEMORY_CHARS} characters).")
+        return content
+
+    @app.get("/api/memories")
+    def list_memories():
+        return storage.list_memories()
+
+    @app.post("/api/memories")
+    def add_memory(request: Request, body: MemoryBody):
+        require_local(request)
+        return storage.add_memory(clean_memory(body))
+
+    @app.put("/api/memories/{memory_id}")
+    def update_memory(request: Request, memory_id: int, body: MemoryBody):
+        require_local(request)
+        content = clean_memory(body)
+        if not storage.update_memory(memory_id, content):
+            raise HTTPException(404, detail="Memory not found")
+        return next(m for m in storage.list_memories() if m["id"] == memory_id)
+
+    @app.delete("/api/memories/{memory_id}", status_code=204)
+    def delete_memory(request: Request, memory_id: int):
+        require_local(request)
+        if not storage.delete_memory(memory_id):
+            raise HTTPException(404, detail="Memory not found")
+        return Response(status_code=204)
+
+    @app.delete("/api/memories")
+    def clear_memories(request: Request):
+        require_local(request)
+        return {"deleted": storage.clear_memories()}
 
     @app.get("/api/files")
     def list_files(path: str = ""):
@@ -325,7 +379,11 @@ def create_app(
         )
         # Heals conversations saved with unanswered tool calls by older builds.
         history = close_open_tool_calls(storage.get_conversation(req.conversation_id)["messages"])
-        system_prompt = (state.settings and state.settings.system_prompt) or SYSTEM_PROMPT
+        base_prompt = (state.settings and state.settings.system_prompt) or SYSTEM_PROMPT
+        memory_on = bool(state.settings and state.settings.memory_enabled)
+        system_prompt = build_system_prompt(
+            base_prompt, storage.list_memories() if memory_on else [], memory_on
+        )
         tools = state.registry
         new_messages: list[dict] = []
         # This stream's own futures. ask() looks here, not in state.pending, because a
@@ -423,8 +481,10 @@ def build_providers(settings: Settings) -> dict[str, Provider]:
     }
 
 
-def build_registry_for(settings: Settings) -> ToolRegistry:
-    return build_registry(ToolContext(Explorer(settings.workspace_dir)))
+def build_registry_for(settings: Settings, storage: Storage | None = None) -> ToolRegistry:
+    return build_registry(ToolContext(
+        Explorer(settings.workspace_dir), storage, settings.internet_enabled, settings.memory_enabled
+    ))
 
 
 def apply_env_settings(changes: dict) -> tuple[Settings, dict[str, Provider]]:
@@ -435,13 +495,14 @@ def apply_env_settings(changes: dict) -> tuple[Settings, dict[str, Provider]]:
 
 def build_default_app() -> FastAPI:
     settings = load_settings()
+    storage = Storage(settings.db_path)
     return create_app(
         build_providers(settings),
-        build_registry_for(settings),
-        Storage(settings.db_path),
+        build_registry_for(settings, storage),
+        storage,
         settings=settings,
         apply_settings=apply_env_settings,
-        make_registry=build_registry_for,
+        make_registry=lambda s: build_registry_for(s, storage),
     )
 
 

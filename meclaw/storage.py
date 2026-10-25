@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS messages (
     name TEXT NULL,
     created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    created_at TEXT,
+    updated_at TEXT
+);
 """
 
 _CONV_COLS = "id, title, provider, model, created_at, updated_at"
@@ -129,6 +135,40 @@ class Storage:
                 f"UPDATE conversations SET {sets} WHERE id = ?",
                 (*fields.values(), conversation_id),
             )
+
+    def list_memories(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, content, created_at, updated_at FROM memories ORDER BY id"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_memory(self, content: str) -> dict:
+        now = _now()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO memories (content, created_at, updated_at) VALUES (?, ?, ?)",
+                (content, now, now),
+            )
+            memory_id = cur.lastrowid
+        return {"id": memory_id, "content": content, "created_at": now, "updated_at": now}
+
+    def update_memory(self, memory_id: int, content: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE memories SET content = ?, updated_at = ? WHERE id = ?",
+                (content, _now(), memory_id),
+            )
+            return cur.rowcount > 0
+
+    def delete_memory(self, memory_id: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            return cur.rowcount > 0
+
+    def clear_memories(self) -> int:
+        with self._connect() as conn:
+            return conn.execute("DELETE FROM memories").rowcount
 
 
 class _Conn:

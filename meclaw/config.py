@@ -20,10 +20,17 @@ class Settings:
     default_model: str | None = None
     system_prompt: str | None = None
     workspace_dir: Path = DEFAULT_WORKSPACE
+    internet_enabled: bool = True
+    memory_enabled: bool = True
 
 
 def _optional(name: str) -> str | None:
     return (os.getenv(name) or "").strip() or None
+
+
+def parse_flag(value: str | None) -> bool:
+    """Off for "0", "false", "off", "no" (case-insensitive); anything else, or unset, is on."""
+    return (value or "").strip().lower() not in ("0", "false", "off", "no")
 
 
 def load_settings() -> Settings:
@@ -40,4 +47,6 @@ def load_settings() -> Settings:
         default_model=_optional("MECLAW_DEFAULT_MODEL"),
         system_prompt=_optional("MECLAW_SYSTEM_PROMPT"),
         workspace_dir=Path(workspace) if workspace else DEFAULT_WORKSPACE,
+        internet_enabled=parse_flag(os.getenv("MECLAW_INTERNET")),
+        memory_enabled=parse_flag(os.getenv("MECLAW_MEMORY")),
     )

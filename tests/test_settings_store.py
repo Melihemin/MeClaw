@@ -69,3 +69,24 @@ def test_workspace_default_and_override(monkeypatch, tmp_path):
     assert load_settings().workspace_dir == PROJECT_ROOT / "workspace"
     monkeypatch.setenv("MECLAW_WORKSPACE", str(tmp_path))
     assert load_settings().workspace_dir == tmp_path
+
+
+import pytest
+
+from meclaw.config import parse_flag
+
+
+@pytest.mark.parametrize("value,expected", [
+    (None, True), ("", True), ("1", True), ("0", False), ("FALSE", False),
+    ("off", False), ("no", False), ("yes", True),
+])
+def test_parse_flag(value, expected):
+    assert parse_flag(value) is expected
+
+
+def test_flags_load_from_env(monkeypatch):
+    monkeypatch.setattr("meclaw.config.dotenv.load_dotenv", lambda *a, **k: None)
+    monkeypatch.setenv("MECLAW_INTERNET", "0")
+    monkeypatch.delenv("MECLAW_MEMORY", raising=False)
+    s = load_settings()
+    assert s.internet_enabled is False and s.memory_enabled is True
