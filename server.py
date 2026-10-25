@@ -5,6 +5,8 @@ import json
 import logging
 import re
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Callable
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -13,11 +15,12 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from meclaw.agent import run_agent
-from meclaw.config import load_settings
+from meclaw.agent import SYSTEM_PROMPT, run_agent
+from meclaw.config import Settings, load_settings
 from meclaw.llm.base import Provider
 from meclaw.llm.ollama import OllamaProvider
 from meclaw.llm.openai import OpenAIProvider
+from meclaw.settings_store import save_settings
 from meclaw.storage import Storage
 from meclaw.tools.registry import ToolRegistry
 from tools.finder.explorer_class import Explorer
@@ -29,6 +32,12 @@ DEFAULT_TITLE = "Yeni sohbet"
 TITLE_LENGTH = 40
 DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 _KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_\-*.…]+")
+_HOST_PATTERN = re.compile(r"^https?://\S+$")
+MAX_PROMPT_LENGTH = 8000
+
+# apply_settings(changes) saves {ENV_NAME: value | None} and returns the reloaded
+# settings plus freshly built providers.
+ApplySettings = Callable[[dict], tuple[Settings, dict[str, Provider]]]
 
 
 class ChatRequest(BaseModel):
@@ -36,6 +45,15 @@ class ChatRequest(BaseModel):
     provider: str
     model: str
     message: str
+
+
+class SettingsUpdate(BaseModel):
+    ollama_host: str | None = None
+    openai_api_key: str | None = None
+    clear_openai_api_key: bool = False
+    default_provider: str | None = None
+    default_model: str | None = None
+    system_prompt: str | None = None
 
 
 def sse(name: str, data: dict) -> str:
@@ -52,6 +70,8 @@ def create_app(
     registry: ToolRegistry,
     storage: Storage,
     allowed_hosts: list[str] | None = None,
+    settings: Settings | None = None,
+    apply_settings: ApplySettings | None = None,
 ) -> FastAPI:
     app = FastAPI()
     # Reject foreign Host headers so DNS rebinding cannot reach the local API.
@@ -59,9 +79,11 @@ def create_app(
         TrustedHostMiddleware, allowed_hosts=allowed_hosts or DEFAULT_ALLOWED_HOSTS
     )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    # Replaced as a whole when settings are saved, so in-flight chats keep their provider.
+    state = SimpleNamespace(settings=settings, providers=providers)
 
     def get_provider(name: str) -> Provider:
-        provider = providers.get(name)
+        provider = state.providers.get(name)
         if provider is None:
             raise HTTPException(404, detail=f"Unknown provider: {name}")
         return provider
@@ -73,7 +95,7 @@ def create_app(
     @app.get("/api/providers")
     async def list_providers():
         result = []
-        for name, provider in providers.items():
+        for name, provider in state.providers.items():
             try:
                 ready, reason = await provider.status()
             except Exception as exc:
@@ -92,6 +114,58 @@ def create_app(
             detail = redact(str(exc))
             logger.error("Listing models failed: %s: %s", provider, detail)
             raise HTTPException(503, detail=detail)
+
+    def settings_payload() -> dict:
+        s = state.settings
+        key = s.openai_api_key or ""
+        return {
+            "ollama_host": s.ollama_host,
+            "openai_key_set": bool(key),
+            "openai_key_hint": f"…{key[-4:]}" if len(key) >= 8 else "",
+            "default_provider": s.default_provider or "",
+            "default_model": s.default_model or "",
+            "system_prompt": s.system_prompt or "",
+            "system_prompt_default": SYSTEM_PROMPT,
+            "providers": list(state.providers),
+        }
+
+    def require_settings() -> None:
+        if state.settings is None or apply_settings is None:
+            raise HTTPException(404, detail="Settings are not available")
+
+    @app.get("/api/settings")
+    def get_settings():
+        require_settings()
+        return settings_payload()
+
+    @app.put("/api/settings")
+    def put_settings(req: SettingsUpdate):
+        require_settings()
+        changes: dict[str, str | None] = {}
+        if req.ollama_host is not None:
+            host = req.ollama_host.strip()
+            if host and not _HOST_PATTERN.match(host):
+                raise HTTPException(400, detail="Ollama adresi http:// veya https:// ile başlamalı.")
+            changes["OLLAMA_HOST"] = host or None
+        if req.clear_openai_api_key:
+            changes["OPENAI_API_KEY"] = None
+        elif req.openai_api_key and req.openai_api_key.strip():
+            changes["OPENAI_API_KEY"] = req.openai_api_key.strip()
+        if req.default_provider is not None:
+            name = req.default_provider.strip()
+            if name and name not in state.providers:
+                raise HTTPException(400, detail=f"Bilinmeyen sağlayıcı: {name}")
+            changes["MECLAW_DEFAULT_PROVIDER"] = name or None
+        if req.default_model is not None:
+            changes["MECLAW_DEFAULT_MODEL"] = req.default_model.strip() or None
+        if req.system_prompt is not None:
+            prompt = req.system_prompt.strip()
+            if len(prompt) > MAX_PROMPT_LENGTH:
+                raise HTTPException(400, detail=f"Sistem istemi en fazla {MAX_PROMPT_LENGTH} karakter olabilir.")
+            changes["MECLAW_SYSTEM_PROMPT"] = None if prompt in ("", SYSTEM_PROMPT) else prompt
+        if changes:
+            state.settings, state.providers = apply_settings(changes)
+        return settings_payload()
 
     @app.get("/api/conversations")
     def list_conversations():
@@ -130,12 +204,15 @@ def create_app(
             req.conversation_id, title=title, provider=req.provider, model=req.model
         )
         history = storage.get_conversation(req.conversation_id)["messages"]
+        system_prompt = (state.settings and state.settings.system_prompt) or SYSTEM_PROMPT
         new_messages: list[dict] = []
 
         async def gen():
             try:
                 try:
-                    async for event in run_agent(provider, req.model, history, registry, new_messages):
+                    async for event in run_agent(
+                        provider, req.model, history, registry, new_messages, system_prompt
+                    ):
                         if event.type == "text":
                             yield sse("text", {"text": event.text})
                         else:
@@ -165,13 +242,28 @@ def create_app(
     return app
 
 
-def build_default_app() -> FastAPI:
-    settings = load_settings()
-    providers = {
+def build_providers(settings: Settings) -> dict[str, Provider]:
+    return {
         "ollama": OllamaProvider(settings.ollama_host),
         "openai": OpenAIProvider(settings.openai_api_key),
     }
-    return create_app(providers, ToolRegistry(Explorer()), Storage(settings.db_path))
+
+
+def apply_env_settings(changes: dict) -> tuple[Settings, dict[str, Provider]]:
+    save_settings(changes)
+    settings = load_settings()
+    return settings, build_providers(settings)
+
+
+def build_default_app() -> FastAPI:
+    settings = load_settings()
+    return create_app(
+        build_providers(settings),
+        ToolRegistry(Explorer()),
+        Storage(settings.db_path),
+        settings=settings,
+        apply_settings=apply_env_settings,
+    )
 
 
 if __name__ == "__main__":

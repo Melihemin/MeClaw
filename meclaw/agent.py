@@ -36,8 +36,9 @@ async def run_agent(
     history: list[dict],
     registry: ToolRegistry,
     new_messages: list[dict],
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> AsyncIterator[AgentEvent]:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(history)
+    messages = [{"role": "system", "content": system_prompt}] + list(history)
     tools = registry.definitions()
 
     for _ in range(MAX_TURNS):
