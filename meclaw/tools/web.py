@@ -10,7 +10,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from meclaw.tools.base import ToolContext, ToolSpec
+from meclaw.tools.base import ToolContext, ToolSpec, as_int
 
 MAX_REDIRECTS = 5
 MAX_BODY_BYTES = 2_000_000
@@ -127,13 +127,13 @@ def check_public_host(host: str) -> None:
             raise ValueError(f"Blocked address: {host}")
 
 
-def _check_url(url: str) -> None:
+async def _check_url(url: str) -> None:
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https"):
         raise ValueError("Only http and https URLs are supported.")
     if not parts.hostname:
         raise ValueError("Invalid URL.")
-    check_public_host(parts.hostname)
+    await asyncio.to_thread(check_public_host, parts.hostname)
 
 
 async def _read_body(response: httpx.Response) -> tuple[bytes, bool]:
@@ -167,7 +167,7 @@ async def fetch(url: str, transport: httpx.AsyncBaseTransport | None = None) -> 
         ) as client, asyncio.timeout(TOTAL_DEADLINE_SECONDS):
             current = url
             for _ in range(MAX_REDIRECTS + 1):
-                _check_url(current)
+                await _check_url(current)
                 async with client.stream("GET", current) as response:
                     location = response.headers.get("location")
                     if response.status_code in _REDIRECT_CODES and location:
@@ -205,9 +205,9 @@ async def fetch_url(ctx: ToolContext, url: str) -> str:
     return await fetch(url)
 
 
-async def web_search(ctx: ToolContext, query: str, max_results: int = 5) -> str:
+async def web_search(ctx: ToolContext, query: str, max_results: int | str | None = 5) -> str:
     try:
-        limit = max(1, min(int(max_results), MAX_SEARCH_RESULTS))
+        limit = max(1, min(as_int(max_results, 5), MAX_SEARCH_RESULTS))
         results = await asyncio.to_thread(_ddgs_text, query, limit)
     except Exception as exc:
         return f"Web search failed: {exc}"

@@ -172,3 +172,30 @@ def test_fetch_blocks_tricky_hosts(monkeypatch, url, host):
         raise AssertionError("transport reached")
     out = asyncio.run(fetch(url, transport=httpx.MockTransport(handler)))
     assert out == f"Blocked address: {host}"
+
+
+def test_dns_runs_off_the_event_loop(monkeypatch):
+    import threading
+
+    seen = {}
+
+    def slow(host):
+        seen["thread"] = threading.current_thread()
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(web, "_resolve", slow)
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, text="hi", headers={"content-type": "text/plain"}))
+
+    async def go():
+        main = threading.current_thread()
+        assert await fetch("http://ornek.com/", transport=transport) == "hi"
+        return main
+
+    main = asyncio.run(go())
+    assert seen["thread"] is not main
+
+
+def test_web_search_max_results_none(monkeypatch):
+    monkeypatch.setattr(web, "_ddgs_text", lambda q, n: [{"title": "T", "href": "h", "body": "b"}])
+    out = asyncio.run(web.web_search(None, "q", max_results=None))
+    assert out.startswith("1. T")
