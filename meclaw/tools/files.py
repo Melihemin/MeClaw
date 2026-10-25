@@ -4,7 +4,7 @@ from __future__ import annotations
 import fnmatch
 from datetime import datetime
 
-from meclaw.tools.base import Confirmation, ToolContext, ToolSpec
+from meclaw.tools.base import Confirmation, ToolContext, ToolSpec, as_bool, as_int
 
 MAX_LIST_ENTRIES = 500
 MAX_SEARCH_RESULTS = 50
@@ -32,16 +32,66 @@ def _explorer_tool(
     return ToolSpec(name, description, _obj(properties, required), handler, confirm)
 
 
-def _walk(path, depth: int, recursive: bool, out: list[tuple[int, str, bool]]) -> None:
-    entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-    for entry in entries:
+PRUNED_DIRS = {".git", "node_modules", "__pycache__", ".venv"}
+
+
+def _is_link(entry) -> bool:
+    try:
+        return entry.is_symlink() or entry.is_junction()
+    except OSError:
+        return True
+
+
+def _safe_entries(ctx: ToolContext, folder) -> list:
+    """Sorted entries of folder, minus anything resolving outside the workspace."""
+    base = ctx.explorer.base_dir
+    entries = []
+    for entry in folder.iterdir():
+        try:
+            if not entry.resolve().is_relative_to(base):
+                continue
+        except (OSError, RuntimeError):
+            continue
+        entries.append(entry)
+    entries.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
+    return entries
+
+
+def _walk(ctx: ToolContext, path, depth: int, recursive: bool, out: list[tuple[int, str, bool]], limit: int) -> None:
+    """Depth-first listing; stops once more than `limit` entries were collected."""
+    for entry in _safe_entries(ctx, path):
+        if len(out) > limit:
+            return
         is_dir = entry.is_dir()
         out.append((depth, entry.name, is_dir))
-        if recursive and is_dir and not entry.is_symlink():
-            _walk(entry, depth + 1, recursive, out)
+        if recursive and is_dir and not _is_link(entry) and entry.name not in PRUNED_DIRS:
+            _walk(ctx, entry, depth + 1, recursive, out, limit)
 
 
-def list_items(ctx: ToolContext, path: str = "", recursive: bool = False) -> str:
+def _walk_files(ctx: ToolContext, root):
+    """Yield (relative posix path, file) lazily, in sorted order, without leaving the workspace."""
+    stack = [root]
+    while stack:
+        folder = stack.pop()
+        try:
+            entries = _safe_entries(ctx, folder)
+        except OSError:
+            continue
+        subdirs = []
+        for entry in entries:
+            try:
+                if entry.is_dir():
+                    if not _is_link(entry) and entry.name not in PRUNED_DIRS:
+                        subdirs.append(entry)
+                elif entry.is_file() and not _is_link(entry):
+                    yield entry.relative_to(root).as_posix(), entry
+            except OSError:
+                continue
+        stack.extend(reversed(subdirs))
+
+
+def list_items(ctx: ToolContext, path: str | None = "", recursive: bool | str | None = False) -> str:
+    path = path or ""
     try:
         folder = ctx.explorer.resolve(path)
     except ValueError:
@@ -52,7 +102,7 @@ def list_items(ctx: ToolContext, path: str = "", recursive: bool = False) -> str
         return f"'{path}' is not a folder."
     entries: list[tuple[int, str, bool]] = []
     try:
-        _walk(folder, 0, bool(recursive), entries)
+        _walk(ctx, folder, 0, as_bool(recursive, False), entries, MAX_LIST_ENTRIES)
     except OSError:
         return "Failed to list the folder."
     if not entries:
@@ -61,11 +111,13 @@ def list_items(ctx: ToolContext, path: str = "", recursive: bool = False) -> str
     for depth, name, is_dir in entries[:MAX_LIST_ENTRIES]:
         lines.append(f"{'  ' * depth}{'📁' if is_dir else '📄'} {name}")
     if len(entries) > MAX_LIST_ENTRIES:
-        lines.append(f"… ({len(entries) - MAX_LIST_ENTRIES} more)")
+        lines.append("… (more items not shown)")
     return "\n".join(lines)
 
 
-def read_file(ctx: ToolContext, filename: str, start_line: int | None = None, end_line: int | None = None) -> str:
+def read_file(ctx: ToolContext, filename: str, start_line: int | str | None = None, end_line: int | str | None = None) -> str:
+    start_line = as_int(start_line, None)
+    end_line = as_int(end_line, None)
     if start_line is None and end_line is None:
         return ctx.explorer.read_file(filename)
     if not filename:
@@ -80,15 +132,16 @@ def read_file(ctx: ToolContext, filename: str, start_line: int | None = None, en
         return "Failed to read the file."
     lines = text.splitlines()
     total = len(lines)
-    start = int(start_line) if start_line is not None else 1
-    end = int(end_line) if end_line is not None else total
+    start = start_line if start_line is not None else 1
+    end = end_line if end_line is not None else total
     if start < 1 or start > total or end < start:
         return "Invalid line range."
     end = min(end, total)
     return f"Lines {start}-{end} of {total}:\n" + "\n".join(lines[start - 1 : end])
 
 
-def search_files(ctx: ToolContext, query: str = "", name_pattern: str = "", path: str = "") -> str:
+def search_files(ctx: ToolContext, query: str | None = "", name_pattern: str | None = "", path: str | None = "") -> str:
+    query, name_pattern, path = query or "", name_pattern or "", path or ""
     if not query and not name_pattern:
         return "Provide query or name_pattern."
     try:
@@ -99,16 +152,8 @@ def search_files(ctx: ToolContext, query: str = "", name_pattern: str = "", path
         return f"Folder '{path}' not found."
     needle = query.casefold()
     pattern = name_pattern.casefold()
-    files = []
-    for f in root.rglob("*"):
-        try:
-            if f.is_file() and not f.is_symlink():
-                files.append((f.relative_to(root).as_posix(), f))
-        except OSError:
-            continue
-    files.sort(key=lambda item: item[0])
     results: list[str] = []
-    for rel, f in files:
+    for rel, f in _walk_files(ctx, root):
         if len(results) > MAX_SEARCH_RESULTS:
             break
         if pattern and not fnmatch.fnmatch(f.name.casefold(), pattern):
@@ -124,7 +169,7 @@ def search_files(ctx: ToolContext, query: str = "", name_pattern: str = "", path
             continue
         for number, line in enumerate(text.splitlines(), 1):
             if needle in line.casefold():
-                results.append(f"{rel}:{number}: {line.strip()}")
+                results.append(f"{rel}:{number}: {line.strip()[:200]}")
                 if len(results) > MAX_SEARCH_RESULTS:
                     break
     if not results:
@@ -134,7 +179,8 @@ def search_files(ctx: ToolContext, query: str = "", name_pattern: str = "", path
     return "\n".join(results)
 
 
-def edit_file(ctx: ToolContext, filename: str, old_text: str = "", new_text: str = "", mode: str = "replace") -> str:
+def edit_file(ctx: ToolContext, filename: str, old_text: str | None = "", new_text: str | None = "", mode: str | None = "replace") -> str:
+    old_text, new_text, mode = old_text or "", new_text or "", mode or "replace"
     if not filename:
         return "No filename provided."
     try:

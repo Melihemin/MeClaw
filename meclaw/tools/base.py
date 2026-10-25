@@ -17,6 +17,33 @@ logger = logging.getLogger(__name__)
 MAX_RESULT_CHARS = 20000
 
 
+def as_bool(value, default: bool) -> bool:
+    """Coerce model-supplied booleans ("true"/"false"/"1"/"0", None) to bool."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("true", "1", "yes"):
+            return True
+        if text in ("false", "0", "no", ""):
+            return False
+        return default
+    return bool(value)
+
+
+def as_int(value, default):
+    """Coerce model-supplied integers (numeric strings, None) to int, else default."""
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError, OverflowError):
+            return default
+
+
 @dataclass
 class Confirmation:
     description: str
@@ -69,7 +96,7 @@ class ToolRegistry:
             return spec.confirm(self._ctx, arguments or {})
         except Exception:
             logger.exception("Confirm rule for %s failed", name)
-            return None
+            return Confirmation(f"‘{name}’ aracı çalıştırılacak.")
 
     @staticmethod
     def _cap(result: str) -> str:

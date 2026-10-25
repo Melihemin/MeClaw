@@ -39,7 +39,7 @@ def test_list_items_recursive_limit(tmp_path):
     for i in range(600):
         (tmp_path / f"f{i:03}.txt").write_text("")
     out = runner(tmp_path)("list_items", recursive=True)
-    assert out.count("📄") == 500 and out.rstrip().endswith("… (100 more)")
+    assert out.count("📄") == 500 and out.rstrip().endswith("… (more items not shown)")
 
 
 def test_read_file_range(tmp_path):
@@ -173,3 +173,86 @@ def test_edit_confirmation_preview(tmp_path):
     c2 = reg.needs_confirmation("write_file", {"filename": "a.txt", "content": "y" * 1000})
     assert c2.preview == "y" * 600
     assert reg.needs_confirmation("delete_file", {"filename": "a.txt"}).preview == ""
+
+
+def _link_dir(link, target, junction=False):
+    """Create a directory symlink or Windows junction; skip if the OS refuses."""
+    if not junction:
+        try:
+            link.symlink_to(target, target_is_directory=True)
+            return
+        except (OSError, NotImplementedError):
+            pass
+    try:
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    except (ImportError, OSError, AttributeError):
+        pytest.skip("cannot create a directory link here")
+
+
+def _escape_setup(tmp_path, junction=False):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("TOPSECRET")
+    (ws / "ok.txt").write_text("TOPSECRET here too")
+    _link_dir(ws / "link", outside, junction)
+    return ws
+
+
+def test_search_does_not_follow_directory_links(tmp_path):
+    ws = _escape_setup(tmp_path)
+    out = runner(ws)("search_files", query="topsecret")
+    assert "ok.txt" in out and "secret.txt" not in out and "link" not in out
+
+
+def test_list_recursive_does_not_follow_directory_links(tmp_path):
+    ws = _escape_setup(tmp_path)
+    out = runner(ws)("list_items", recursive=True)
+    assert "secret.txt" not in out
+
+
+def test_walk_prunes_noise_dirs(tmp_path):
+    for d in (".git", "node_modules", "__pycache__", ".venv"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "x.txt").write_text("needle")
+    (tmp_path / "keep.txt").write_text("needle")
+    run = runner(tmp_path)
+    out = run("search_files", query="needle")
+    assert out == "keep.txt:1: needle"
+    assert "x.txt" not in run("list_items", recursive=True)
+
+
+def test_search_stops_at_cap(tmp_path):
+    for i in range(120):
+        (tmp_path / f"f{i:03}.txt").write_text("hit")
+    out = runner(tmp_path)("search_files", query="hit")
+    assert out.endswith("(results limited to 50)") and len(out.splitlines()) == 51
+
+
+def test_search_line_cut_at_200(tmp_path):
+    (tmp_path / "big.txt").write_text("needle " + "x" * 5000)
+    out = runner(tmp_path)("search_files", query="needle")
+    assert out == "big.txt:1: " + ("needle " + "x" * 5000)[:200]
+
+
+def test_arg_coercion_files(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.csv").write_text("a\nb\nc\n")
+    (tmp_path / "a.txt").write_text("1\n2\n3\n")
+    run = runner(tmp_path)
+    assert "b.csv" not in run("list_items", recursive="false")
+    assert "b.csv" in run("list_items", recursive="true")
+    assert "b.csv" in run("search_files", query=None, name_pattern="*.csv")
+    assert run("read_file", filename="a.txt", start_line="2", end_line="3").endswith("2\n3")
+    assert run("edit_file", filename="a.txt", old_text=None, new_text="z", mode="append") == "Edited 'a.txt'."
+    assert run("edit_file", filename="a.txt", old_text="1", new_text="9", mode=None) == "Edited 'a.txt'."
+
+
+def test_junction_is_not_followed(tmp_path):
+    ws = _escape_setup(tmp_path, junction=True)
+    run = runner(ws)
+    assert "secret.txt" not in run("search_files", query="topsecret")
+    assert "secret.txt" not in run("list_items", recursive=True)

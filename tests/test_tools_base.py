@@ -46,7 +46,7 @@ def test_result_truncated(tmp_path):
     assert asyncio.run(reg.run("big", {})) == "x" * 20000 + "\n…(truncated)"
 
 
-def test_needs_confirmation_swallows_errors(tmp_path):
+def test_needs_confirmation_fails_closed(tmp_path):
     def bad(ctx, args):
         raise ValueError("x")
 
@@ -54,6 +54,15 @@ def test_needs_confirmation_swallows_errors(tmp_path):
         ToolSpec("t", "", EMPTY, lambda ctx: "ok", confirm=bad),
         ToolSpec("u", "", EMPTY, lambda ctx: "ok"),
     ])
-    assert reg.needs_confirmation("t", {}) is None
+    conf = reg.needs_confirmation("t", {})
+    assert conf is not None and "‘t’" in conf.description
     assert reg.needs_confirmation("u", {}) is None
     assert reg.needs_confirmation("nope", {}) is None
+
+
+def test_coercion_helpers():
+    from meclaw.tools.base import as_bool, as_int
+
+    assert as_bool(None, True) is True and as_bool("false", True) is False and as_bool("0", True) is False
+    assert as_bool("True", False) is True and as_bool("1", False) is True and as_bool(True, False) is True
+    assert as_int(None, 5) == 5 and as_int("7", 5) == 7 and as_int(3, 5) == 3 and as_int("x", 5) == 5
