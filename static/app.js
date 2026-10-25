@@ -39,6 +39,22 @@ const els = {
   knownModels: $("known-models"),
   setPrompt: $("set-prompt"),
   resetPrompt: $("reset-prompt"),
+  setWorkspace: $("set-workspace"),
+  resetWorkspace: $("reset-workspace"),
+  openFiles: $("open-files"),
+  files: $("files"),
+  filesUpload: $("files-upload"),
+  filesOpen: $("files-open"),
+  filesRefresh: $("files-refresh"),
+  filesClose: $("files-close"),
+  filesCrumbs: $("files-crumbs"),
+  filesList: $("files-list"),
+  filesStatus: $("files-status"),
+  preview: $("files-preview"),
+  previewBack: $("preview-back"),
+  previewName: $("preview-name"),
+  previewDownload: $("preview-download"),
+  previewBody: $("preview-body"),
 };
 
 const state = {
@@ -51,6 +67,7 @@ const state = {
   model: "",
   settings: null,     // GET /api/settings payload, or null when unavailable
   clearKey: false,
+  filesPath: "",      // folder shown in the Files panel, relative to the workspace
 };
 
 // ---------- storage helpers ----------
@@ -550,6 +567,7 @@ async function sendMessage() {
       } else if (ev.name === "tool") {
         settle();
         addToolTag(ev.data.name, ev.data.result);
+        refreshFilesSoon();
       } else if (ev.name === "error") {
         settle();
         addErrorLine(ev.data.message || "Bilinmeyen hata");
@@ -628,7 +646,7 @@ function fillSettingsForm() {
   els.setKey.value = "";
   state.clearKey = false;
   const serverFields = [els.setOllama, els.setKey, els.setDefaultProvider, els.setDefaultModel, els.setPrompt,
-    els.clearKey, els.resetPrompt];
+    els.clearKey, els.resetPrompt, els.setWorkspace, els.resetWorkspace];
   serverFields.forEach((el) => { el.disabled = !s; });
   if (!s) {
     setSettingsStatus("Sunucu ayarları bu ortamda düzenlenemiyor.", true);
@@ -653,6 +671,8 @@ function fillSettingsForm() {
   fillKnownModels();
 
   els.setPrompt.value = s.system_prompt || s.system_prompt_default || "";
+  els.setWorkspace.value = s.workspace || "";
+  els.setWorkspace.placeholder = s.workspace_default || "";
 }
 
 function fillKnownModels() {
@@ -701,6 +721,10 @@ els.resetPrompt.addEventListener("click", () => {
   if (state.settings) els.setPrompt.value = state.settings.system_prompt_default || "";
 });
 
+els.resetWorkspace.addEventListener("click", () => {
+  if (state.settings) els.setWorkspace.value = state.settings.workspace_default || "";
+});
+
 els.settingsForm.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const theme = els.setTheme.value;
@@ -715,6 +739,9 @@ els.settingsForm.addEventListener("submit", async (ev) => {
     system_prompt: els.setPrompt.value,
     clear_openai_api_key: state.clearKey,
   };
+  const workspaceBefore = state.settings.workspace;
+  // Leave the workspace alone unless it was edited, so saving never rewrites it needlessly.
+  if (els.setWorkspace.value.trim() !== (workspaceBefore || "")) payload.workspace = els.setWorkspace.value;
   if (!state.clearKey && els.setKey.value.trim()) payload.openai_api_key = els.setKey.value.trim();
 
   els.settingsSave.disabled = true;
@@ -733,8 +760,248 @@ els.settingsForm.addEventListener("submit", async (ev) => {
     els.setKey.value = "";
   }
   els.dialog.close();
+  if (state.settings.workspace !== workspaceBefore) {
+    state.filesPath = "";
+    if (!els.files.hidden) loadFiles("");
+  }
   await loadProviders();
   if (!isUsable(state.provider, state.model) || !state.conversationId) applyDefaultSelection();
+});
+
+// ---------- files panel ----------
+
+const FILE_ICONS = [
+  [/\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i, "🖼️"],
+  [/\.(docx?|odt|rtf)$/i, "📝"],
+  [/\.(zip|rar|7z|tar|gz)$/i, "🗜️"],
+  [/\.(pdf)$/i, "📕"],
+  [/\.(xlsx?|csv)$/i, "📊"],
+  [/\.(py|js|ts|json|html|css|md|txt|yml|yaml|toml|ini|bat|sh)$/i, "📄"],
+];
+
+function fileIcon(entry) {
+  if (entry.type === "dir") return "📁";
+  for (const [re, icon] of FILE_ICONS) if (re.test(entry.name)) return icon;
+  return "📄";
+}
+
+function formatSize(bytes) {
+  if (bytes == null) return "";
+  if (bytes < 1024) return bytes + " B";
+  const units = ["KB", "MB", "GB"];
+  let v = bytes / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (v < 10 ? v.toFixed(1) : Math.round(v)) + " " + units[i];
+}
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
+}
+
+function setFilesStatus(text, isError) {
+  els.filesStatus.textContent = text || "";
+  els.filesStatus.classList.toggle("error", Boolean(isError));
+}
+
+function filesUrl(endpoint, params) {
+  return endpoint + "?" + new URLSearchParams(params).toString();
+}
+
+function renderCrumbs(path) {
+  els.filesCrumbs.textContent = "";
+  const parts = path ? path.split("/") : [];
+  const add = (label, target) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.addEventListener("click", () => loadFiles(target));
+    els.filesCrumbs.appendChild(b);
+  };
+  add("Çalışma alanı", "");
+  parts.forEach((part, i) => {
+    const sep = document.createElement("span");
+    sep.className = "sep";
+    sep.textContent = "›";
+    els.filesCrumbs.appendChild(sep);
+    add(part, parts.slice(0, i + 1).join("/"));
+  });
+}
+
+function renderFileList(entries) {
+  els.filesList.textContent = "";
+  if (!entries.length) {
+    const li = document.createElement("li");
+    li.className = "files-empty";
+    li.textContent = "Bu klasör boş. Dosya sürükleyip bırakabilirsiniz.";
+    els.filesList.appendChild(li);
+    return;
+  }
+  for (const entry of entries) {
+    const li = document.createElement("li");
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "file-row";
+    row.title = entry.name;
+    const icon = document.createElement("span");
+    icon.className = "icon";
+    icon.textContent = fileIcon(entry);
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = entry.name;
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = entry.type === "dir" ? formatDate(entry.modified)
+      : formatSize(entry.size) + " · " + formatDate(entry.modified);
+    row.appendChild(icon);
+    row.appendChild(name);
+    row.appendChild(meta);
+    row.addEventListener("click", () => {
+      if (entry.type === "dir") loadFiles(entry.path); else openPreview(entry.path);
+    });
+    li.appendChild(row);
+    els.filesList.appendChild(li);
+  }
+}
+
+async function loadFiles(path) {
+  let data;
+  try {
+    data = await api(filesUrl("/api/files", { path: path || "" }));
+  } catch (e) {
+    if (path && e.status === 404) return loadFiles("");  // folder vanished: go back to the root
+    setFilesStatus(e.message, true);
+    return;
+  }
+  state.filesPath = data.path;
+  renderCrumbs(data.path);
+  renderFileList(data.entries);
+  const count = data.entries.length;
+  setFilesStatus(count ? count + " öğe" : "");
+}
+
+let refreshTimer = null;
+function refreshFilesSoon() {
+  if (els.files.hidden) return;
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => loadFiles(state.filesPath), 250);
+}
+
+function toggleFiles(open) {
+  els.files.hidden = !open;
+  els.openFiles.setAttribute("aria-expanded", String(open));
+  if (open) {
+    closePreview();
+    loadFiles(state.filesPath);
+  }
+}
+
+function closePreview() {
+  els.preview.hidden = true;
+  els.previewBody.textContent = "";
+}
+
+async function openPreview(path) {
+  let info;
+  try { info = await api(filesUrl("/api/files/preview", { path })); }
+  catch (e) { setFilesStatus(e.message, true); return; }
+  els.previewName.textContent = info.name;
+  els.previewName.title = info.path;
+  els.previewDownload.href = filesUrl("/api/files/download", { path: info.path });
+  els.previewBody.textContent = "";
+  if (info.kind === "text") {
+    const pre = document.createElement("pre");
+    pre.textContent = info.content;
+    els.previewBody.appendChild(pre);
+  } else if (info.kind === "docx") {
+    const div = document.createElement("div");
+    div.className = "doc";
+    div.textContent = info.content;
+    els.previewBody.appendChild(div);
+  } else if (info.kind === "image") {
+    const img = document.createElement("img");
+    img.alt = info.name;
+    img.src = filesUrl("/api/files/download", { path: info.path, inline: "1" });
+    els.previewBody.appendChild(img);
+  } else {
+    const p = document.createElement("p");
+    p.className = "preview-note";
+    p.textContent = (info.kind === "too_large" ? "Önizleme için çok büyük" : "Bu dosya önizlenemiyor")
+      + " (" + formatSize(info.size) + "). İndirmek için sağ üstteki düğmeyi kullanın.";
+    els.previewBody.appendChild(p);
+  }
+  els.preview.hidden = false;
+}
+
+async function uploadFiles(fileList) {
+  const filesToSend = Array.from(fileList || []);
+  if (!filesToSend.length) return;
+  const target = state.filesPath;
+  let done = 0;
+  for (const file of filesToSend) {
+    setFilesStatus("Yükleniyor: " + file.name + " (" + (done + 1) + "/" + filesToSend.length + ")");
+    try {
+      await api(filesUrl("/api/files/upload", { path: target, name: file.name }), {
+        method: "POST",
+        headers: { "X-MeClaw": "1" },
+        body: file,
+      });
+      done++;
+    } catch (e) {
+      setFilesStatus(file.name + ": " + e.message, true);
+      await loadFiles(target);
+      return;
+    }
+  }
+  await loadFiles(target);
+  setFilesStatus(done + " dosya yüklendi.");
+}
+
+els.openFiles.addEventListener("click", () => toggleFiles(els.files.hidden));
+els.filesClose.addEventListener("click", () => toggleFiles(false));
+els.filesRefresh.addEventListener("click", () => loadFiles(state.filesPath));
+els.previewBack.addEventListener("click", closePreview);
+els.filesUpload.addEventListener("change", () => {
+  uploadFiles(els.filesUpload.files);
+  els.filesUpload.value = "";
+});
+
+els.filesOpen.addEventListener("click", async () => {
+  try {
+    await api(filesUrl("/api/workspace/open", { path: state.filesPath }), {
+      method: "POST",
+      headers: { "X-MeClaw": "1" },
+    });
+  } catch (e) {
+    setFilesStatus(e.message, true);
+  }
+});
+
+let dragDepth = 0;
+els.files.addEventListener("dragenter", (ev) => {
+  if (!ev.dataTransfer || !Array.from(ev.dataTransfer.types).includes("Files")) return;
+  ev.preventDefault();
+  dragDepth++;
+  els.files.classList.add("dragging");
+});
+els.files.addEventListener("dragover", (ev) => {
+  if (els.files.classList.contains("dragging")) ev.preventDefault();
+});
+els.files.addEventListener("dragleave", () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) els.files.classList.remove("dragging");
+});
+els.files.addEventListener("drop", (ev) => {
+  ev.preventDefault();
+  dragDepth = 0;
+  els.files.classList.remove("dragging");
+  closePreview();
+  uploadFiles(ev.dataTransfer && ev.dataTransfer.files);
 });
 
 // ---------- init ----------

@@ -52,6 +52,9 @@
         <button id="new-chat-top" class="icon-btn" type="button" aria-label="Yeni sohbet" title="Yeni sohbet">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
         </button>
+        <button id="open-files" class="icon-btn" type="button" aria-label="Dosyalar" title="Dosyalar" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+        </button>
       </header>
 
       <div id="banner" class="banner" hidden>
@@ -74,6 +77,43 @@
         <p class="hint">Enter gönderir, Shift+Enter yeni satır. MeClaw hata yapabilir.</p>
       </div>
     </main>
+
+    <aside id="files" class="files" aria-label="Dosyalar" hidden>
+      <header class="files-head">
+        <strong>Dosyalar</strong>
+        <div class="files-actions">
+          <label class="icon-btn" title="Dosya yükle" aria-label="Dosya yükle">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>
+            <input id="files-upload" type="file" multiple hidden>
+          </label>
+          <button id="files-open" class="icon-btn" type="button" title="Klasörü Gezgin'de aç" aria-label="Klasörü Gezgin'de aç">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+          </button>
+          <button id="files-refresh" class="icon-btn" type="button" title="Yenile" aria-label="Yenile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+          </button>
+          <button id="files-close" class="icon-btn" type="button" title="Kapat" aria-label="Kapat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+      </header>
+      <nav id="files-crumbs" class="crumbs" aria-label="Klasör yolu"></nav>
+      <ul id="files-list" class="files-list"></ul>
+      <section id="files-preview" class="files-preview" hidden>
+        <header class="preview-head">
+          <button id="preview-back" class="icon-btn" type="button" title="Geri" aria-label="Geri">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <span id="preview-name" class="preview-name"></span>
+          <a id="preview-download" class="icon-btn" title="İndir" aria-label="İndir" download>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg>
+          </a>
+        </header>
+        <div id="preview-body" class="preview-body"></div>
+      </section>
+      <div id="files-status" class="files-status" role="status"></div>
+      <div class="drop-hint">Yüklemek için bırakın</div>
+    </aside>
   </div>
 
   <dialog id="settings" class="settings" aria-labelledby="settings-title">
@@ -111,6 +151,18 @@
           <div class="key-row">
             <span id="key-status" class="muted"></span>
             <button id="clear-key" class="link-btn danger" type="button">Anahtarı sil</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Çalışma alanı</h3>
+          <label class="stack">
+            <span>Çalışma klasörü</span>
+            <input id="set-workspace" type="text" autocomplete="off" spellcheck="false">
+          </label>
+          <div class="key-row">
+            <span class="muted small">Asistanın dosya araçları yalnızca bu klasörde çalışır. Yoksa oluşturulur.</span>
+            <button id="reset-workspace" class="link-btn" type="button">Varsayılana dön</button>
           </div>
         </section>
 

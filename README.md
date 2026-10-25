@@ -12,7 +12,8 @@ MeClaw is a local assistant that runs as a small web app. You chat with it in yo
 - Settings dialog that edits .env and applies changes without a restart: Ollama address, OpenAI API key (never shown back), default provider/model, system prompt, and light/dark/system theme
 - Streaming replies
 - Chat history stored in SQLite (data/meclaw.db)
-- 16 file and folder tools, restricted to the workspace folder tools/finder/testdir:
+- Files panel (📁 in the top bar): browse the workspace, preview text, Word and image files, download, upload by drag and drop, and open the folder in the file manager; it refreshes when the assistant changes files
+- 16 file and folder tools, restricted to the workspace folder (default: workspace/ in the project, changeable in Settings):
   - create, read, write, copy, rename, and delete files
   - create, list, move, rename, copy, zip, and extract folders and archives
   - DOCX read/write via python-docx
@@ -23,6 +24,7 @@ MeClaw is a local assistant that runs as a small web app. You chat with it in yo
 - meclaw/: application package
   - config.py: settings loaded from .env
   - settings_store.py: writes settings changes back to .env
+  - files.py: workspace listing, previews and uploads for the Files panel
   - agent.py: chat loop with tool calling
   - storage.py: SQLite conversation storage
   - llm/: provider layer (base.py, ollama.py, openai.py)
@@ -30,7 +32,7 @@ MeClaw is a local assistant that runs as a small web app. You chat with it in yo
 - static/: web frontend (index.html, app.js, style.css)
 - tools/finder/explorer_class.py: file and folder explorer implementation
 - tools/finder/tool_definitions.json: tool schema definitions
-- tools/finder/testdir/: workspace the tools operate in
+- workspace/: default folder the tools operate in (git-ignored, created on first run)
 - tests/: automated tests
 - start.bat: Windows startup script
 
@@ -44,6 +46,7 @@ MeClaw is a local assistant that runs as a small web app. You chat with it in yo
    - OPENAI_API_KEY: required only to use the OpenAI provider.
    - MECLAW_DEFAULT_PROVIDER / MECLAW_DEFAULT_MODEL (optional): provider and model new chats start with.
    - MECLAW_SYSTEM_PROMPT (optional): custom system prompt; the built-in prompt is used when empty.
+   - MECLAW_WORKSPACE (optional): absolute path of the folder the assistant works in; defaults to workspace/ in the project.
    - MECLAW_DB_PATH (optional): custom path for the SQLite database (restart required).
 
 ## Running the Project
