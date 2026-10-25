@@ -1,6 +1,7 @@
 """FastAPI chat server for MeClaw."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -20,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from meclaw import files
-from meclaw.agent import SYSTEM_PROMPT, run_agent
+from meclaw.agent import SYSTEM_PROMPT, ConfirmRequest, run_agent
 from meclaw.config import DEFAULT_WORKSPACE, Settings, load_settings
 from meclaw.llm.base import Provider
 from meclaw.llm.ollama import OllamaProvider
@@ -42,6 +43,7 @@ _HOST_PATTERN = re.compile(r"^https?://\S+$")
 MAX_PROMPT_LENGTH = 8000
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 LOCAL_HEADER = "X-MeClaw"
+CONFIRM_TIMEOUT = 300  # seconds a destructive tool call waits for the user's decision
 
 # apply_settings(changes) saves {ENV_NAME: value | None} and returns the reloaded
 # settings plus freshly built providers.
@@ -53,6 +55,11 @@ class ChatRequest(BaseModel):
     provider: str
     model: str
     message: str
+
+
+class ConfirmDecision(BaseModel):
+    confirm_id: str
+    approved: bool
 
 
 class SettingsUpdate(BaseModel):
@@ -72,6 +79,11 @@ def sse(name: str, data: dict) -> str:
 def redact(text: str) -> str:
     """Hide API keys (full or masked) that provider errors may echo back."""
     return _KEY_PATTERN.sub("sk-***", text)
+
+
+def _resolve(fut: asyncio.Future, approved: bool) -> None:
+    if not fut.done():
+        fut.set_result(approved)
 
 
 def open_in_file_manager(path: Path) -> None:
@@ -105,6 +117,8 @@ def create_app(
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     # Replaced as a whole when settings are saved, so in-flight chats keep their provider.
     state = SimpleNamespace(settings=settings, providers=providers, registry=registry)
+    # Pending confirmations: id -> (loop the waiting chat runs on, its decision future).
+    state.pending: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Future]] = {}
     hosts = allowed_hosts or DEFAULT_ALLOWED_HOSTS
 
     def require_local(request: Request) -> None:
@@ -313,15 +327,48 @@ def create_app(
         system_prompt = (state.settings and state.settings.system_prompt) or SYSTEM_PROMPT
         tools = state.registry
         new_messages: list[dict] = []
+        my_pending: set[str] = set()
+
+        def register(confirm_id: str) -> asyncio.Future:
+            entry = state.pending.get(confirm_id)
+            if entry is None:
+                loop = asyncio.get_running_loop()
+                entry = (loop, loop.create_future())
+                state.pending[confirm_id] = entry
+                my_pending.add(confirm_id)
+            return entry[1]
+
+        async def ask(confirm_req: ConfirmRequest) -> bool:
+            fut = register(confirm_req.id)
+            try:
+                return await asyncio.wait_for(fut, CONFIRM_TIMEOUT)
+            except TimeoutError:
+                return False
+            finally:
+                state.pending.pop(confirm_req.id, None)
+                my_pending.discard(confirm_req.id)
 
         async def gen():
             try:
                 try:
                     async for event in run_agent(
-                        provider, req.model, history, tools, new_messages, system_prompt
+                        provider, req.model, history, tools, new_messages, system_prompt,
+                        confirm=ask,
                     ):
                         if event.type == "text":
                             yield sse("text", {"text": event.text})
+                        elif event.type == "confirm":
+                            # Registered before the event goes out, so a fast decision
+                            # cannot arrive ahead of its future.
+                            register(event.id)
+                            yield sse("confirm", {
+                                "id": event.id,
+                                "name": event.name,
+                                "description": event.description,
+                                "preview": event.preview,
+                            })
+                        elif event.type == "confirm_result":
+                            yield sse("confirm_result", {"id": event.id, "approved": event.approved})
                         else:
                             yield sse("tool", {
                                 "name": event.name,
@@ -335,6 +382,12 @@ def create_app(
                     )
                     yield sse("error", {"message": message})
             finally:
+                # A closed stream can no longer show a decision: drop its waiting futures.
+                for confirm_id in list(my_pending):
+                    entry = state.pending.pop(confirm_id, None)
+                    if entry is not None:
+                        entry[1].cancel()
+                my_pending.clear()
                 # Runs on normal end and on client disconnect (GeneratorExit/CancelledError);
                 # run_agent records partial text on those too, so it is saved here.
                 if new_messages:
@@ -345,6 +398,17 @@ def create_app(
             yield sse("done", {"conversation_id": req.conversation_id})
 
         return StreamingResponse(gen(), media_type="text/event-stream")
+
+    @app.post("/api/chat/confirm", status_code=204)
+    def confirm_tool(request: Request, decision: ConfirmDecision):
+        require_local(request)
+        entry = state.pending.get(decision.confirm_id)
+        if entry is None or entry[1].done():
+            raise HTTPException(404, detail="Confirmation not found")
+        loop, fut = entry
+        # The request may run on another thread or loop; resolve on the future's own loop.
+        loop.call_soon_threadsafe(_resolve, fut, decision.approved)
+        return Response(status_code=204)
 
     return app
 

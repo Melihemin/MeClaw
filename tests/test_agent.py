@@ -75,3 +75,83 @@ def test_partial_text_kept_on_generator_close(registry):
 
     asyncio.run(_run())
     assert new == [{"role": "assistant", "content": "Yar"}]
+
+
+def delete_turns(*names):
+    calls = [ToolCall(f"c{i}", "delete_file", {"filename": n}) for i, n in enumerate(names, 1)]
+    return FakeProvider(turns=[[ChatEvent("tool_calls", tool_calls=calls)], [ChatEvent("text", "tamam")]])
+
+
+def test_confirmed_tool_runs(registry, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    seen = []
+
+    async def yes(req):
+        seen.append(req)
+        return True
+
+    new = []
+    events = collect(run_agent(delete_turns("a.txt"), "m", [{"role": "user", "content": "sil"}], registry, new, confirm=yes))
+    assert [e.type for e in events] == ["confirm", "confirm_result", "tool", "text"]
+    assert seen[0].description == "‘a.txt’ silinecek."
+    assert seen[0].name == "delete_file" and seen[0].arguments == {"filename": "a.txt"}
+    assert events[0].id == seen[0].id == events[1].id and len(seen[0].id) == 32
+    assert events[0].description == "‘a.txt’ silinecek." and events[0].name == "delete_file"
+    assert events[1].approved is True
+    assert not (tmp_path / "a.txt").exists()
+
+
+def test_denied_tool_not_run(registry, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+
+    async def no(req):
+        return False
+
+    new = []
+    events = collect(run_agent(delete_turns("a.txt"), "m", [{"role": "user", "content": "sil"}], registry, new, confirm=no))
+    assert (tmp_path / "a.txt").exists()
+    assert new[1]["content"] == "Denied by the user: ‘a.txt’ silinecek."
+    assert events[1].type == "confirm_result" and events[1].approved is False
+    assert events[2].type == "tool" and events[2].result == "Denied by the user: ‘a.txt’ silinecek."
+
+
+def test_no_confirm_hook_denies(registry, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    new = []
+    collect(run_agent(delete_turns("a.txt"), "m", [{"role": "user", "content": "sil"}], registry, new))
+    assert (tmp_path / "a.txt").exists()
+    assert new[1]["content"] == "Denied by the user: ‘a.txt’ silinecek."
+
+
+def test_raising_confirm_hook_denies(registry, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+
+    async def boom(req):
+        raise RuntimeError("x")
+
+    new = []
+    events = collect(run_agent(delete_turns("a.txt"), "m", [{"role": "user", "content": "sil"}], registry, new, confirm=boom))
+    assert (tmp_path / "a.txt").exists() and events[1].approved is False
+    assert new[1]["content"] == "Denied by the user: ‘a.txt’ silinecek."
+
+
+def test_two_confirmations_in_one_turn(registry, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    (tmp_path / "b.txt").write_text("x")
+
+    async def first_only(req):
+        return req.arguments["filename"] == "a.txt"
+
+    events = collect(run_agent(delete_turns("a.txt", "b.txt"), "m", [{"role": "user", "content": "sil"}], registry, [], confirm=first_only))
+    assert not (tmp_path / "a.txt").exists() and (tmp_path / "b.txt").exists()
+    assert [e.type for e in events if e.type.startswith("confirm")] == ["confirm", "confirm_result", "confirm", "confirm_result"]
+
+
+def test_unconfirmed_tools_skip_hook(registry, tmp_path):
+    async def boom(req):
+        raise AssertionError("should not be called")
+
+    call = ToolCall("c1", "create_file", {"filename": "x.txt"})
+    p = FakeProvider(turns=[[ChatEvent("tool_calls", tool_calls=[call])], [ChatEvent("text", "ok")]])
+    events = collect(run_agent(p, "m", [{"role": "user", "content": "x"}], registry, [], confirm=boom))
+    assert [e.type for e in events] == ["tool", "text"] and (tmp_path / "x.txt").exists()
